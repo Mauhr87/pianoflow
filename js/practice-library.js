@@ -1,233 +1,176 @@
 /**
- * PianoFlow — Practice Library
+ * PianoFlow — Practice Library  (Fase 1: mode-first + biblioteca)
  *
- * Organización: familia × patrón × estilo × dificultad
+ * Organización nueva: modo × técnica × estilo × dificultad
  *
- * Cada familia agrupa acordes que comparten color o forma de mano y
- * define progresiones por estilo (worship / pop / hebrew) y dificultad
- * (basic / intermediate / advanced). El generador de sesión usa esto
- * para armar las 5 secciones (preparación → cierre).
+ *   - modes        → eje principal de navegación (5 modos). Cada modo
+ *                    agrupa techniques (equivalente a los "goals" de DrumFlow).
+ *   - techniques   → cada técnica × estilo × nivel = 1 ítem del manifest.
+ *   - styles       → eje ortogonal (worship / pop / hebrew).
+ *   - difficulties → nivel + tonalidad atada (Opción C): la tonalidad NO es
+ *                    un selector aparte, viene determinada por el nivel.
+ *
+ * Cada técnica apunta a un `pattern` de PatternLibrary. Las técnicas cuyo
+ * patrón dedicado aún no existe llevan `pending:true` y caen en 'bloque'
+ * como patrón provisional (se completarán en la Fase 4 — generador).
+ *
+ * El id de cada ítem del manifest es:  `${mode}-${technique}-${style}-${difficulty}`
+ * ej: "chords-block-worship-basic"
  */
 
 const PracticeLibrary = {
 
-  // ── Familias ────────────────────────────────────────────────────────
+  // ── Modos (eje principal / home) ─────────────────────────────────────
 
-  families: {
+  modes: {
 
-    abierto_do: {
-      label: 'Abierto Do',
-      icon:  '🌅',
-      desc:  'Los pilares de la tonalidad de Do: C, F, G, Am, Dm, Em.',
-      chords: ['C', 'F', 'G', 'Am', 'Dm', 'Em'],
-      cue:   'Mantén los dedos curvos y deja la muñeca relajada. Cambia de acorde como bloque, no nota por nota.',
-      progressions: {
-        worship: {
-          basic:        [['C','G'],                ['Am','F']],
-          intermediate: [['C','G','Am','F'],       ['Am','F','C','G']],
-          advanced:     [['C','G','Am','Em','F','C','F','G'],
-                         ['Am','F','C','G','F','C','Dm','G']],
-        },
-        pop: {
-          basic:        [['C','Am'],               ['F','G']],
-          intermediate: [['C','G','Am','F'],       ['Am','F','C','G']],
-          advanced:     [['C','Em','Am','F','C','G','F','G'],
-                         ['Am','C','F','G','Em','Am','Dm','G']],
-        },
-        hebrew: {
-          basic:        [['Am','G'],               ['Am','Dm']],
-          intermediate: [['Am','G','F','Em'],      ['Am','Dm','G','Am']],
-          advanced:     [['Am','G','F','Em','Am','Dm','G','Am'],
-                         ['Am','Em','F','G','Am','Dm','Em','Am']],
-        },
+    chords: {
+      label: 'Acordes',
+      icon:  '🎹',
+      desc:  'Armonía y acompañamiento: construir y enlazar acordes.',
+      techniques: {
+        block:       { label: 'Bloque',      icon: '⏹',  desc: 'Acorde completo a tiempos. Calentamiento ideal.',        pattern: 'bloque' },
+        waltz:       { label: 'Vals / Balada', icon: '🎶', desc: 'Bajo + respiraciones de acorde. Aire ternario sobre 4/4.', pattern: 'vals_balada' },
+        octaves:     { label: 'Octavas',     icon: '🎹', desc: 'LH alterna grave y octava; RH acorde en contratiempos.',  pattern: 'octavas_lh' },
+        syncopation: { label: 'Síncopa',     icon: '🔀', desc: 'Acordes anticipados, acentos fuera del pulso.',           pattern: 'bloque', pending: true },
+        inversions:  { label: 'Inversiones', icon: '🔁', desc: 'Cambios por voz más cercana usando inversiones.',         pattern: 'bloque', pending: true },
       },
     },
 
-    abierto_sol: {
-      label: 'Abierto Sol',
-      icon:  '🌞',
-      desc:  'Tonalidad de Sol mayor: G, D, A, Em, Bm. Brillante y abierta.',
-      chords: ['G', 'D', 'A', 'Em', 'Bm'],
-      cue:   'El F♯ pide que la mano se acomode un poco. Practica el cambio G→D primero — es el motor de esta familia.',
-      progressions: {
-        worship: {
-          basic:        [['G','D'],                ['Em','D']],
-          intermediate: [['G','D','Em','D'],       ['G','D','Em','Bm']],
-          advanced:     [['G','D','Em','Bm','G','D','A','D'],
-                         ['Em','Bm','G','D','Em','D','G','D']],
-        },
-        pop: {
-          basic:        [['G','Em'],               ['G','D']],
-          intermediate: [['G','D','Em','D'],       ['Em','D','G','D']],
-          advanced:     [['G','D','Em','Bm','A','D','G','D'],
-                         ['Em','G','D','A','Bm','G','D','A']],
-        },
-        hebrew: {
-          basic:        [['Em','D'],               ['Em','Bm']],
-          intermediate: [['Em','D','Bm','Em'],     ['Em','D','A','Em']],
-          advanced:     [['Em','D','Bm','A','Em','Bm','D','Em'],
-                         ['Em','Bm','D','A','Em','D','Bm','Em']],
-        },
+    arpeggios: {
+      label: 'Arpegios',
+      icon:  '🌊',
+      desc:  'Mano derecha: figuras desplegadas del acorde.',
+      techniques: {
+        alberti:    { label: 'Alberti',          icon: '🌀', desc: 'Figura clásica grave-agudo-medio-agudo en corcheas.',     pattern: 'alberti' },
+        wide:       { label: 'Amplio',           icon: '↗',  desc: 'Sube por las notas del acorde abriendo posición.',         pattern: 'arpegio_amplio' },
+        ballad:     { label: 'Balada arpegiada', icon: '🌊', desc: 'Estilo Coldplay / worship: 1-3-5-8 repetido.',             pattern: 'arpegio_balada' },
+        tenths:     { label: 'Décimas',          icon: '🎼', desc: 'Apertura LH a décimas bajo el arpegio.',                   pattern: 'arpegio_amplio', pending: true },
+        crosshands: { label: 'Cruzados',         icon: '✋', desc: 'Manos cruzadas sobre el arpegio.',                         pattern: 'alberti', pending: true },
       },
     },
 
-    worship_moderno: {
-      label: 'Worship moderno',
-      icon:  '🙏',
-      desc:  'Colores sus2/add9 e inversiones. El sonido de la adoración contemporánea.',
-      chords: ['Csus2', 'Cadd9', 'Gsus4', 'G', 'Em7', 'Dsus2', 'D', 'F/C'],
-      cue:   'Deja que las notas comunes (D y G) suenen entre cambios. No las "cortes": el secreto está en el legato armónico.',
-      progressions: {
-        worship: {
-          basic:        [['Cadd9','G'],            ['Em7','Dsus2']],
-          intermediate: [['Cadd9','G','Em7','Dsus2'], ['G','D','Em7','Cadd9']],
-          advanced:     [['Cadd9','G','Em7','Dsus2','Cadd9','G','D','Em7'],
-                         ['Em7','Cadd9','G','Dsus2','Em7','D','Cadd9','G']],
-        },
-        pop: {
-          basic:        [['Cadd9','G'],            ['Em7','D']],
-          intermediate: [['Cadd9','G','Em7','D'],  ['G','D','Em7','Csus2']],
-          advanced:     [['G','D','Em7','Cadd9','G','D','Cadd9','Dsus2'],
-                         ['Cadd9','Em7','G','D','Cadd9','G','F/C','Dsus2']],
-        },
-        hebrew: {
-          basic:        [['Em7','D'],              ['Em7','G']],
-          intermediate: [['Em7','D','G','D'],      ['Em7','Cadd9','G','D']],
-          advanced:     [['Em7','D','Cadd9','G','Em7','Dsus2','Cadd9','D'],
-                         ['Em7','G','Cadd9','D','Em7','D','G','Em7']],
-        },
+    melodic: {
+      label: 'Melódico / Escalas',
+      icon:  '🎵',
+      desc:  'Escalas, modos y frases para soltar la mano.',
+      techniques: {
+        majorscale:  { label: 'Escala mayor',     icon: '📈', desc: 'Escala mayor del nivel, ambas manos.',          pattern: 'bloque', pending: true },
+        minorscale:  { label: 'Escala menor',     icon: '📉', desc: 'Escala menor relativa, ambas manos.',           pattern: 'bloque', pending: true },
+        modes:       { label: 'Modos',            icon: '🌀', desc: 'Modos griegos sobre la tónica del nivel.',      pattern: 'bloque', pending: true },
+        pentablues:  { label: 'Pentatónica / Blues', icon: '🎷', desc: 'Pentatónica y escala de blues.',             pattern: 'bloque', pending: true },
+        hanon:       { label: 'Hanon',            icon: '💪', desc: 'Ejercicios Hanon para independencia y fuerza.', pattern: 'bloque', pending: true },
+        phrases:     { label: 'Frases',           icon: '🗣', desc: 'Frases melódicas cortas sobre la armonía.',     pattern: 'bloque', pending: true },
       },
     },
 
-    hebreo_menor: {
-      label: 'Menor hebreo',
-      icon:  '🕎',
-      desc:  'Am, Dm, E, Am7, G — tensión dominante hacia tónica menor. Sabor frigio dominante.',
-      chords: ['Am', 'Dm', 'E', 'Am7', 'G', 'F'],
-      cue:   'Siente cómo el E mayor "tira" hacia Am. Esa tensión es el corazón del sabor hebreo.',
-      progressions: {
-        worship: {
-          basic:        [['Am','E'],               ['Am','Dm']],
-          intermediate: [['Am','Dm','E','Am'],     ['Am','G','Dm','E']],
-          advanced:     [['Am','G','F','E','Am','Dm','E','Am'],
-                         ['Am','Dm','G','E','Am','F','Dm','E']],
-        },
-        pop: {
-          basic:        [['Am','G'],               ['Am','F']],
-          intermediate: [['Am','G','F','E'],       ['Am','F','G','E']],
-          advanced:     [['Am','G','F','E','Am','F','Dm','E'],
-                         ['Am','Am7','Dm','G','F','G','E','Am']],
-        },
-        hebrew: {
-          basic:        [['Am','E'],               ['Am','Dm']],
-          intermediate: [['Am','Dm','E','Am'],     ['Am','G','F','E']],
-          advanced:     [['Am','G','F','E','Am','Dm','E','Am'],
-                         ['Am','Am7','Dm','G','F','E','Am','E']],
-        },
+    coordination: {
+      label: 'Coordinación de manos',
+      icon:  '🤝',
+      desc:  'Independencia y diálogo entre las dos manos.',
+      techniques: {
+        independence: { label: 'Independencia',  icon: '🤲', desc: 'Ostinato en LH mientras RH varía.',           pattern: 'ostinato_hebreo' },
+        crosssync:    { label: 'Síncopa entre manos', icon: '🔀', desc: 'Acentos cruzados, una mano anticipa a la otra.', pattern: 'octavas_lh', pending: true },
+        polyrhythm:   { label: 'Polirritmia 2-vs-3', icon: '🌀', desc: 'Dos contra tres entre las manos.',          pattern: 'bloque', pending: true },
       },
     },
 
-    septimas_pop: {
-      label: 'Séptimas pop',
-      icon:  '✨',
-      desc:  'Cmaj7, Am7, Dm7, G7, Fmaj7. Colores suaves de jazz-pop.',
-      chords: ['Cmaj7', 'Am7', 'Dm7', 'G7', 'Fmaj7'],
-      cue:   'La séptima quiere resolver. En Dm7→G7→Cmaj7 escucha cómo cada voz baja un semitono. Eso es el "ii–V–I".',
-      progressions: {
-        worship: {
-          basic:        [['Cmaj7','Am7'],          ['Fmaj7','G7']],
-          intermediate: [['Cmaj7','Am7','Fmaj7','G7'], ['Cmaj7','Fmaj7','Am7','G7']],
-          advanced:     [['Cmaj7','Am7','Dm7','G7','Cmaj7','Fmaj7','Dm7','G7'],
-                         ['Am7','Dm7','G7','Cmaj7','Am7','Fmaj7','Dm7','G7']],
-        },
-        pop: {
-          basic:        [['Cmaj7','Am7'],          ['Dm7','G7']],
-          intermediate: [['Cmaj7','Am7','Dm7','G7'], ['Am7','Dm7','G7','Cmaj7']],
-          advanced:     [['Cmaj7','Am7','Dm7','G7','Fmaj7','Am7','Dm7','G7'],
-                         ['Am7','Fmaj7','Cmaj7','G7','Dm7','G7','Cmaj7','Am7']],
-        },
-        hebrew: {
-          basic:        [['Am7','Dm7'],            ['Am7','G7']],
-          intermediate: [['Am7','Dm7','G7','Cmaj7'], ['Am7','Fmaj7','G7','Am7']],
-          advanced:     [['Am7','Dm7','G7','Cmaj7','Am7','Fmaj7','Dm7','G7'],
-                         ['Am7','Fmaj7','Dm7','G7','Am7','Dm7','G7','Cmaj7']],
-        },
+    sightreading: {
+      label: 'Lectura a primera vista',
+      icon:  '👁',
+      desc:  'Piezas progresivas con seguimiento nota a nota.',
+      techniques: {
+        progressive: { label: 'Piezas progresivas', icon: '📖', desc: 'Piezas que suben de dificultad gradualmente.', pattern: 'bloque', pending: true },
+        follow:      { label: 'Modo follow',         icon: '👁', desc: 'Seguimiento del playhead nota a nota.',         pattern: 'bloque', pending: true },
       },
     },
 
   },
 
-  // ── Estilos ─────────────────────────────────────────────────────────
+  // ── Estilos (eje ortogonal) ─────────────────────────────────────────
 
   styles: {
-    worship: { label: 'Worship',    icon: '🙏', bpm: 75, description: 'Aire contemplativo, dejar respirar.' },
+    worship: { label: 'Worship',      icon: '🙏', bpm: 75, description: 'Aire contemplativo, dejar respirar.' },
     pop:     { label: 'Pop / Balada', icon: '✨', bpm: 90, description: 'Pulso firme y melódico.' },
-    hebrew:  { label: 'Hebreo',     icon: '🕎', bpm: 85, description: 'Tensión frigia, expresión modal.' },
+    hebrew:  { label: 'Hebreo',       icon: '🕎', bpm: 85, description: 'Tensión frigia, expresión modal.' },
   },
 
-  // ── Dificultades ────────────────────────────────────────────────────
+  // ── Dificultades + tonalidad (Opción C) ─────────────────────────────
+  //
+  // Un único camino lineal. La tonalidad sale del nivel; el generador
+  // usará `tonic`/`sharps` para transponer (Fase 4).
+  //   básico       → Do mayor / La menor   (0 alteraciones)
+  //   intermedio   → Sol mayor / Mi menor  (1 sostenido)
+  //   avanzado     → Re mayor / Si menor   (2 sostenidos)
 
   difficulties: {
-    basic:        { label: 'Básico',     bpmFactor: 0.85, repeats: 4, description: 'Más lento, más repeticiones por acorde.' },
-    intermediate: { label: 'Intermedio', bpmFactor: 1.00, repeats: 2, description: 'Tempo base, cambios cada 2 compases.' },
-    advanced:     { label: 'Avanzado',   bpmFactor: 1.10, repeats: 1, description: 'Tempo elevado, cambios cada compás.' },
+    basic:        { label: 'Básico',     tonic: 'C', mode: 'major', rel: 'Am', sharps: 0, bpmFactor: 0.85, repeats: 4, description: 'Do mayor / La menor. Más lento, más repeticiones.' },
+    intermediate: { label: 'Intermedio', tonic: 'G', mode: 'major', rel: 'Em', sharps: 1, bpmFactor: 1.00, repeats: 2, description: 'Sol mayor / Mi menor. Tempo base.' },
+    advanced:     { label: 'Avanzado',   tonic: 'D', mode: 'major', rel: 'Bm', sharps: 2, bpmFactor: 1.10, repeats: 1, description: 'Re mayor / Si menor. Tempo elevado.' },
   },
 
   // ── Estructura de la sesión (5 secciones) ───────────────────────────
 
   sections: [
-    { key: 'prep',        label: 'Preparación', bars: 4,  note: 'Calentamiento sobre 1-2 acordes con patrón simple.', simplified: true },
-    { key: 'build',       label: 'Construcción', bars: 6, note: 'Progresión completa, patrón aún simplificado.',     simplified: true },
-    { key: 'challenge',   label: 'Desafío',     bars: 6,  note: 'Patrón completo. Es el corazón de la práctica.',     simplified: false },
-    { key: 'application', label: 'Aplicación',  bars: 6,  note: 'Mismo patrón con cambios más fluidos.',              simplified: false },
-    { key: 'close',       label: 'Cierre',      bars: 2,  note: 'Resolución armónica. Respira y cierra.',             simplified: true },
+    { key: 'prep',        label: 'Preparación',  bars: 4, note: 'Calentamiento sobre 1-2 acordes con patrón simple.', simplified: true },
+    { key: 'build',       label: 'Construcción', bars: 6, note: 'Progresión completa, patrón aún simplificado.',       simplified: true },
+    { key: 'challenge',   label: 'Desafío',      bars: 6, note: 'Patrón completo. Es el corazón de la práctica.',      simplified: false },
+    { key: 'application', label: 'Aplicación',   bars: 6, note: 'Mismo patrón con cambios más fluidos.',               simplified: false },
+    { key: 'close',       label: 'Cierre',       bars: 2, note: 'Resolución armónica. Respira y cierra.',              simplified: true },
   ],
 
   // ── Utilidades ──────────────────────────────────────────────────────
 
-  getFamily(key)   { return this.families[key] || null; },
-  getStyle(key)    { return this.styles[key] || null; },
-  getDifficulty(k) { return this.difficulties[k] || null; },
+  getMode(key)       { return this.modes[key] || null; },
+  getStyle(key)      { return this.styles[key] || null; },
+  getDifficulty(k)   { return this.difficulties[k] || null; },
 
-  // Devuelve los patrones aplicables a un estilo.
-  patternsForStyle(styleKey) {
-    const list = PatternLibrary.byStyle[styleKey] || ['bloque'];
-    return list.filter(k => PatternLibrary.get(k));
+  // Técnica concreta dentro de un modo
+  getTechnique(modeKey, techKey) {
+    const m = this.modes[modeKey];
+    return (m && m.techniques[techKey]) || null;
+  },
+
+  // Lista [{ key, ...value }] de un grupo de primer nivel (styles, difficulties)
+  list(group) {
+    return Object.entries(this[group] || {}).map(([key, value]) => ({ key, ...value }));
   },
 
   // ── Manifest: catálogo plano de prácticas pre-armadas ─────────────
   //
-  // Cada ítem es una "pista" lista para reproducir. La UI muestra
-  // la lista filtrada por familia. El usuario sólo escoge una pista,
-  // no ajusta dimensiones — éstas vienen ya cocinadas en el manifest.
+  // Producto cartesiano modes → techniques → styles → difficulties.
+  // Cada ítem es una "pista" lista para reproducir.
   //
   // Estructura por ítem:
-  //   { id, family, style, pattern, difficulty,
-  //     title, subtitle, icon, bpm }
+  //   { id, mode, technique, style, difficulty,
+  //     pattern, pending, title, subtitle, icon, styleIcon, techIcon, bpm }
 
   manifest: [],
 
   buildManifest() {
     const out = [];
-    Object.entries(this.families).forEach(([famKey, fam]) => {
-      Object.entries(this.styles).forEach(([styleKey, style]) => {
-        const patterns = this.patternsForStyle(styleKey);
-        patterns.forEach(patKey => {
-          const pat = PatternLibrary.get(patKey);
-          if (!pat) return;
+    Object.entries(this.modes).forEach(([modeKey, mode]) => {
+      Object.entries(mode.techniques).forEach(([techKey, tech]) => {
+        // Una técnica puede restringir estilos vía tech.styles (opcional).
+        const styleKeys = tech.styles || Object.keys(this.styles);
+        styleKeys.forEach(styleKey => {
+          const style = this.styles[styleKey];
+          if (!style) return;
           Object.entries(this.difficulties).forEach(([diffKey, diff]) => {
             const bpm = Math.round(style.bpm * diff.bpmFactor);
             out.push({
-              id:         `pf-${famKey}-${styleKey}-${patKey}-${diffKey}`,
-              family:     famKey,
+              id:         `${modeKey}-${techKey}-${styleKey}-${diffKey}`,
+              mode:       modeKey,
+              technique:  techKey,
               style:      styleKey,
-              pattern:    patKey,
               difficulty: diffKey,
-              title:      `${pat.label} · ${diff.label}`,
+              pattern:    tech.pattern || 'bloque',
+              pending:    !!tech.pending,
+              title:      `${tech.label} · ${diff.label}`,
               subtitle:   `${style.label} · ${bpm} BPM`,
-              icon:       fam.icon,
+              icon:       mode.icon,
               styleIcon:  style.icon,
-              patternIcon: pat.icon,
+              techIcon:   tech.icon,
               bpm,
             });
           });
@@ -238,19 +181,22 @@ const PracticeLibrary = {
     return out;
   },
 
-  // Helpers para la UI
-  practicesForFamily(famKey) {
+  // ── Helpers para la UI ────────────────────────────────────────────
+
+  // Todos los ítems de un modo (submanifest)
+  forMode(modeKey) {
     if (!this.manifest.length) this.buildManifest();
-    return this.manifest.filter(p => p.family === famKey);
+    return this.manifest.filter(p => p.mode === modeKey);
   },
 
-  getPractice(id) {
+  // Un ítem por su id
+  byId(id) {
     if (!this.manifest.length) this.buildManifest();
     return this.manifest.find(p => p.id === id) || null;
   },
 
-  // Total de prácticas en una familia
-  practiceCount(famKey) {
-    return this.practicesForFamily(famKey).length;
+  // Total de prácticas en un modo
+  countFor(modeKey) {
+    return this.forMode(modeKey).length;
   },
 };
