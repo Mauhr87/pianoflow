@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#22867b">
+<title>PianoFlow</title>
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+<!-- ── Cabecera ─────────────────────────────────────── -->
+<header class="app-header">
+  <button class="brand" type="button" onclick="App.goHome()">
+    <span class="brand-mark">🎹</span>
+    <span>Piano<span>Flow</span></span>
+  </button>
+  <span class="progress-badge" id="progress-badge" hidden>v1</span>
+</header>
+
+<!-- ── App container ─────────────────────────────────── -->
+<div id="app">
+
+  <!-- ─────────────────────── PANTALLA: HOME ─────────────────────── -->
+  <section class="screen active" id="screen-home">
+    <div class="hero">
+      <div class="eyebrow">Práctica de piano · v1</div>
+      <h1>Elige una familia de acordes para empezar</h1>
+      <p class="lede">Cada sesión te lleva por cinco etapas: preparación, construcción, desafío, aplicación y cierre.</p>
+    </div>
+
+    <div class="family-grid" id="family-grid"><!-- llenado por App.renderFamilies() --></div>
+  </section>
+
+  <!-- ─────────────────────── PANTALLA: FAMILIA ─────────────────────── -->
+  <section class="screen" id="screen-family">
+    <button class="back-btn" type="button" onclick="App.goHome()">← Volver</button>
+
+    <div class="family-head">
+      <div class="family-head-icon" id="family-head-icon">🎵</div>
+      <div class="family-head-body">
+        <div class="eyebrow">Familia</div>
+        <h2 id="family-head-title">—</h2>
+        <p class="lede" id="family-head-desc">—</p>
+      </div>
+    </div>
+
+    <div class="family-cue" id="family-head-cue"></div>
+
+    <div class="family-chords-block">
+      <div class="config-label">Acordes</div>
+      <div class="chord-list" id="family-head-chords"></div>
+    </div>
+
+    <!-- Filtro rápido por estilo -->
+    <div class="style-filter" id="style-filter">
+      <button class="filter-pill active" data-filter="all" onclick="App.filterByStyle('all')">Todos</button>
+      <button class="filter-pill" data-filter="worship"    onclick="App.filterByStyle('worship')">🙏 Worship</button>
+      <button class="filter-pill" data-filter="pop"        onclick="App.filterByStyle('pop')">✨ Pop</button>
+      <button class="filter-pill" data-filter="hebrew"     onclick="App.filterByStyle('hebrew')">🕎 Hebreo</button>
+    </div>
+
+    <!-- Lista de prácticas (manifest filtrado) -->
+    <div class="practice-list" id="practice-list"></div>
+  </section>
+
+  <!-- ─────────────────────── PANTALLA: PLAYER ─────────────────────── -->
+  <section class="screen" id="screen-player">
+    <div class="player-head">
+      <button class="back-btn" type="button" onclick="App.exitSession()">← Salir</button>
+      <div class="player-title">
+        <strong id="player-title">—</strong>
+        <small id="player-section">—</small>
+      </div>
+    </div>
+
+    <!-- Row 1: secciones (horizontal scroll) -->
+    <div class="sections-row-frame">
+      <div class="sections-row" id="sections-row"></div>
+    </div>
+
+    <!-- Row 2: pentagrama (Verovio, horizontal scroll) -->
+    <div class="sheet-frame" id="sheet-frame">
+      <div id="notation-loading">Preparando pentagrama…</div>
+      <div id="notation"></div>
+      <!-- chord-labels-overlay se inyecta DENTRO de #notation desde JS
+           para que viaje con el SVG cuando se hace scroll horizontal -->
+    </div>
+
+    <!-- Teclado -->
+    <div class="piano-frame">
+      <div class="piano-scroll" id="piano-scroll">
+        <div id="piano" class="piano"></div>
+      </div>
+      <div class="piano-legend">
+        <span class="legend-item"><span class="dot dot-treble"></span>Mano derecha</span>
+        <span class="legend-item"><span class="dot dot-bass"></span>Mano izquierda</span>
+        <span class="legend-item"><span class="dot dot-both"></span>Ambas</span>
+      </div>
+    </div>
+
+    <!-- Panel de notas del compás (compacto) -->
+    <div class="note-panel">
+      <div class="note-panel-label">Compás actual</div>
+      <div class="note-panel-row">
+        <span class="note-clef treble">𝄞</span>
+        <span id="panel-treble" class="note-chips"><span class="note-chip rest">—</span></span>
+      </div>
+      <div class="note-panel-row">
+        <span class="note-clef bass">𝄢</span>
+        <span id="panel-bass" class="note-chips"><span class="note-chip rest">—</span></span>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<!-- ── Barra de reproductor (sticky bottom) ──────────── -->
+<div id="player-bar" class="player-bar" hidden>
+  <button id="play-btn" class="play-btn" type="button" onclick="Player.togglePlay()">▶</button>
+  <div class="bar-copy">
+    <strong id="bar-label">—</strong>
+    <small id="bar-section">—</small>
+  </div>
+  <button id="loop-btn" class="tool-btn" type="button" onclick="Player.toggleSectionLoop()">⟲<small>BUCLE</small></button>
+  <button id="metronome-btn" class="tool-btn" type="button" onclick="Player.toggleMetronome()">♩<small>CLICK</small></button>
+  <button id="hands-btn" class="tool-btn" type="button" onclick="Player.toggleHands()">♬<small>AMBAS</small></button>
+  <button id="speed-btn" class="tool-btn speed" type="button" onclick="App.toggleSpeed()">100%<small>VEL.</small></button>
+</div>
+
+<!-- ── Toast ──────────────────────────────────────────── -->
+<div id="toast" class="toast" hidden></div>
+
+<!-- ── Scripts (orden importa) ────────────────────────── -->
+<script src="js/chord-library.js"></script>
+<script src="js/pattern-library.js"></script>
+<script src="js/practice-library.js"></script>
+<script src="js/storage.js"></script>
+<script src="js/piano-engine.js"></script>
+<script src="js/audio-engine.js"></script>
+<script src="js/notation-engine.js"></script>
+<script src="js/session-generator.js"></script>
+<script src="js/player.js"></script>
+<script src="js/app.js"></script>
+
+</body>
+</html>
