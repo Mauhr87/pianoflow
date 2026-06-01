@@ -533,6 +533,43 @@ const App = {
       ];
     }
 
+    if (p.mode === 'arpeggios') {
+      const hands = p.meta && p.meta.bothHands
+        ? 'la derecha despliega el acorde y la izquierda sostiene la fundamental'
+        : 'la mano derecha despliega el acorde nota por nota';
+      const position = p.meta && p.meta.inv
+        ? (p.meta.inv === 1 ? ' desde primera inversión' : ' desde segunda inversión')
+        : (p.meta && p.meta.useInversions ? ' usando inversiones cercanas' : '');
+      const pedal = p.meta && p.meta.pedal ? ` Pedal: ${p.meta.pedal}.` : '';
+      const patternName = this._arpeggioPatternName(p.meta && p.meta.arpeggioPattern);
+      const pattern = patternName ? ` Patrón principal: ${patternName}.` : '';
+      const feel = p.meta && p.meta.patternFeel ? ` Sensación: ${p.meta.patternFeel}` : '';
+      const useWhen = p.meta && p.meta.useWhen ? ` Úsalo: ${p.meta.useWhen}` : '';
+      const fifth = p.meta && p.meta.useFifth ? ' La izquierda alterna fundamental y quinta para dar más base.' : '';
+      const patternKey = p.meta && p.meta.arpeggioPattern;
+      const patternError = patternKey === 'basic7'
+        ? 'Acelerar las notas internas, perder la forma 1-3-5-8-5-3-1 o desconectar la llegada al siguiente acorde.'
+        : 'Acelerar las notas internas, perder el dibujo del patrón principal o desconectar la llegada al siguiente acorde.';
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} El foco es que ${hands}${position} con ${chords}.${pattern}${pedal}${fifth}` },
+        { title: 'Qué debes escuchar', body: `El arpegio debe sonar como un solo gesto continuo: cada nota revela el acorde sin volverse una escala mecánica.${feel}${useWhen}` },
+        { title: 'Error común', body: patternError },
+        { title: 'Señal de éxito', body: 'Puedes repetir la sección con sonido parejo, pulso estable y una progresión que se entiende aunque las notas estén separadas.' },
+      ];
+    }
+
+    if (p.mode === 'melodic') {
+      const scaleText = this._scaleList(exerciseChords);
+      const hands = p.meta && p.meta.hands === 'RH' ? 'mano derecha' : 'melodía principal';
+      const rhythm = p.meta && p.meta.rhythmic ? ' Aquí el ritmo es parte del objetivo, no solo la sucesión de notas.' : '';
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Trabajas ${scaleText} con foco en ${hands} y una mini aplicación musical dentro del ejercicio.${rhythm}` },
+        { title: 'Qué debes escuchar', body: 'La escala debe sonar como vocabulario musical: dirección, llegada y color, no como una lista de notas.' },
+        { title: 'Error común', body: 'Subir y bajar la escala mecánicamente sin escuchar dónde descansa la frase o qué emoción produce mayor, menor o pentatónica.' },
+        { title: 'Señal de éxito', body: 'Puedes reconocer el color de la escala y tocar la aplicación final como una frase breve con sentido musical.' },
+      ];
+    }
+
     if (p.mode !== 'chords') {
       return [
         { title: 'Qué estás entrenando', body: baseExplain },
@@ -604,6 +641,33 @@ const App = {
     if (!list.length) return 'la progresión del ejercicio';
     if (list.length === 1) return `el acorde ${list[0]}`;
     return `los acordes ${list.join(' - ')}`;
+  },
+
+  _scaleList(scales) {
+    const list = (scales || []).filter(Boolean);
+    if (!list.length) return 'la escala del ejercicio';
+    if (list.length === 1) return `la escala ${list[0]}`;
+    return `las escalas ${list.join(' - ')}`;
+  },
+
+  _arpeggioPatternName(key) {
+    const labels = {
+      basic7: 'Arpegio básico',
+      base4: 'Patrón Base',
+      bounce: 'Patrón Rebote',
+      expanded: 'Patrón Expandido',
+      modern: 'Patrón Moderno',
+      open: 'Patrón Moderno Abierto',
+      alberti: 'Alberti',
+      baseBounce: 'Patrón Base + Rebote',
+      mixedIntermediate: 'Patrones intermedios',
+      mixedAccompaniment: 'Arpegios de acompañamiento',
+      mixedFluid: 'Arpegios fluidos',
+      mixedPatterns: 'Combinación de patrones',
+      modulePatterns: 'Dominio de patrones',
+      moduleFinalArpeggios: 'Proyecto final de arpegios',
+    };
+    return labels[key] || '';
   },
 
   _triadFamily(chords) {

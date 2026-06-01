@@ -72,6 +72,13 @@ const SessionGenerator = {
       return this._generateAccompaniment(config, mode, tech, style, diff);
     }
 
+    // ── Currículum fiel: ARPEGIOS → ARPEGIOS BÁSICOS ────────────────
+    // RH despliega el acorde con la forma 1-3-5-8-5-3-1. En avanzado se
+    // añade LH como fundamental sostenida para practicar ambas manos.
+    if (config.mode === 'arpeggios') {
+      return this._generateBasicArpeggios(config, mode, tech, style, diff);
+    }
+
     const patternKey = config.pattern || (tech && tech.pattern) || 'bloque';
     const pattern    = PatternLibrary.get(patternKey);
     if (!pattern) {
@@ -673,6 +680,249 @@ const SessionGenerator = {
   },
 
   // ════════════════════════════════════════════════════════════════
+  //  ARPEGIOS — BÁSICOS
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Forma principal: 1-3-5-8-5-3-1. En segmentos de 4 pulsos la última
+  // nota se sostiene para completar el compás; cuando un compás tiene dos
+  // acordes se usa la versión compacta ascendente 1-3-5-8 por acorde.
+
+  _generateBasicArpeggios(config, mode, tech, style, diff) {
+    const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const useInv = !!(config.meta && config.meta.useInversions);
+    const fixedInv = (config.meta && config.meta.inv) || 0;
+    const bothHands = !!(config.meta && config.meta.bothHands);
+    const useFifth = !!(config.meta && config.meta.useFifth);
+    const holdChanges = !!(config.meta && config.meta.holdChanges);
+    const patternKey = (config.meta && config.meta.arpeggioPattern) || 'basic7';
+
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const plan = this._chordStagePlan(total, prog, false);
+
+    let prevMean = null;
+    const chooseVoicing = (label) => {
+      const p = this._parseChord(label);
+      if (!p) return null;
+      let rh;
+      if (fixedInv) {
+        rh = this._chordVoicing(label, fixedInv);
+      } else if (useInv && prevMean !== null) {
+        rh = this._closestChordVoicing(label, prevMean).v;
+      } else {
+        rh = this._chordVoicing(label, 0);
+      }
+      prevMean = this._voicingMean(rh);
+      return { rh, root: 36 + p.rootPc };
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = this._arpeggioSegments(prog, stage, b, mi, holdChanges);
+        const { treble, bass } = this._arpeggioMeasure(segments, chooseVoicing, {
+          bothHands,
+          useFifth,
+          patternKey,
+          stageKey: stage.key,
+        });
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble,
+          bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      measureBeats: 4,
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: this._arpeggioPatternLabel(patternKey), patternKey,
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        pedal: (config.meta && config.meta.pedal) || '',
+        bothHands,
+        useFifth,
+        patternFeel: (config.meta && config.meta.patternFeel) || '',
+        useWhen: (config.meta && config.meta.useWhen) || '',
+      },
+    };
+  },
+
+  _arpeggioSegments(prog, stage, barInStage, globalMeasure, holdChanges) {
+    if (stage.key === 'close') return [{ label: prog[0], beat: 0, dur: 4 }];
+    if (holdChanges && stage.key !== 'challenge') {
+      const label = prog[Math.floor(globalMeasure / 2) % prog.length];
+      return [{ label, beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'prep') {
+      const label = prog[barInStage % Math.min(2, prog.length)];
+      return [{ label, beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'build') {
+      const subset = prog.slice(0, Math.min(4, prog.length));
+      return [{ label: subset[barInStage % subset.length], beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'challenge') {
+      if (prog.length > stage.bars) {
+        return [
+          { label: prog[(barInStage * 2) % prog.length], beat: 0, dur: 2 },
+          { label: prog[(barInStage * 2 + 1) % prog.length], beat: 2, dur: 2 },
+        ];
+      }
+      return [{ label: prog[barInStage % prog.length], beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'application') {
+      const phrase = this._applicationPhrase(prog, stage.bars);
+      return [{ label: phrase[barInStage % phrase.length], beat: 0, dur: 4 }];
+    }
+    return [{ label: prog[barInStage % prog.length], beat: 0, dur: 4 }];
+  },
+
+  _arpeggioMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach(s => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const seq = this._arpeggioSequence(v.rh, s.dur, this._effectiveArpeggioPattern(opts.patternKey, opts.stageKey));
+      seq.forEach(ev => treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+      if (opts.bothHands) {
+        if (opts.useFifth && s.dur >= 4) {
+          bass.push({ midi: v.root, beat: s.beat, duration: 2 });
+          bass.push({ midi: v.root + 7, beat: s.beat + 2, duration: s.dur - 2 });
+        } else {
+          bass.push({ midi: v.root, beat: s.beat, duration: s.dur });
+        }
+      }
+    });
+    return { treble, bass };
+  },
+
+  _effectiveArpeggioPattern(patternKey, stageKey) {
+    if (patternKey === 'baseBounce') return (stageKey === 'challenge' || stageKey === 'application') ? 'bounce' : 'base4';
+    if (patternKey === 'mixedIntermediate') {
+      if (stageKey === 'challenge') return 'modern';
+      if (stageKey === 'application') return 'open';
+      return 'expanded';
+    }
+    if (patternKey === 'mixedAccompaniment') {
+      if (stageKey === 'challenge') return 'modern';
+      if (stageKey === 'application') return 'expanded';
+      return 'basic7';
+    }
+    if (patternKey === 'mixedFluid') {
+      if (stageKey === 'challenge') return 'modern';
+      if (stageKey === 'application') return 'open';
+      return 'expanded';
+    }
+    if (patternKey === 'mixedPatterns') {
+      if (stageKey === 'challenge') return 'modern';
+      if (stageKey === 'application') return 'alberti';
+      return 'base4';
+    }
+    if (patternKey === 'modulePatterns') {
+      if (stageKey === 'prep') return 'base4';
+      if (stageKey === 'build') return 'expanded';
+      if (stageKey === 'challenge') return 'alberti';
+      if (stageKey === 'application') return 'open';
+      return 'modern';
+    }
+    if (patternKey === 'moduleFinalArpeggios') {
+      if (stageKey === 'prep') return 'base4';
+      if (stageKey === 'build') return 'expanded';
+      if (stageKey === 'challenge') return 'modern';
+      if (stageKey === 'application') return 'alberti';
+      return 'open';
+    }
+    return patternKey || 'basic7';
+  },
+
+  _arpeggioPatternLabel(patternKey) {
+    const labels = {
+      basic7: 'Arpegio básico',
+      base4: 'Patrón Base',
+      bounce: 'Patrón Rebote',
+      expanded: 'Patrón Expandido',
+      modern: 'Patrón Moderno',
+      open: 'Patrón Moderno Abierto',
+      alberti: 'Alberti',
+      baseBounce: 'Patrón Base + Rebote',
+      mixedIntermediate: 'Patrones intermedios',
+      mixedAccompaniment: 'Arpegios de acompañamiento',
+      mixedFluid: 'Arpegios fluidos',
+      mixedPatterns: 'Combinación de patrones',
+      modulePatterns: 'Dominio de patrones',
+      moduleFinalArpeggios: 'Proyecto final de arpegios',
+    };
+    return labels[patternKey] || 'Arpegio básico';
+  },
+
+  _arpeggioSequence(voicing, dur, patternKey) {
+    const v = voicing.slice();
+    const top = v.length >= 4 ? v[3] : v[0] + 12;
+    const shapes = {
+      basic7: v.length >= 4 ? [v[0], v[1], v[2], v[3], v[2], v[1], v[0]] : [v[0], v[1], v[2], v[0] + 12, v[2], v[1], v[0]],
+      base4: [v[0], v[1], v[2], top],
+      bounce: [v[0], v[2], v[1], v[2]],
+      expanded: [v[0], v[1], v[2], top, v[2], v[1]],
+      modern: [v[0], v[2], top, v[2]],
+      open: [v[0], top, v[2], top],
+      alberti: [v[0], v[2], v[1], v[2]],
+    };
+    const fullShape = shapes[patternKey] || shapes.basic7;
+    if (dur >= 4) {
+      const cycleCount = Math.max(1, Math.floor(4 / 0.5));
+      const notes = [];
+      for (let i = 0; i < cycleCount; i++) notes.push(fullShape[i % fullShape.length]);
+      if (patternKey === 'basic7') {
+        const durs = [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, dur - 3];
+        let beat = 0;
+        return fullShape.map((midi, i) => {
+          const out = { midi, beat, dur: durs[i] };
+          beat += durs[i];
+          return out;
+        });
+      }
+      let beat = 0;
+      return notes.map(midi => {
+        const out = { midi, beat, dur: 0.5 };
+        beat += 0.5;
+        return out;
+      });
+    }
+    const compact = fullShape.slice(0, Math.max(1, Math.floor(dur / 0.5)));
+    return compact.map((midi, i) => ({ midi, beat: i * 0.5, dur: Math.min(0.5, dur - i * 0.5) }))
+      .filter(ev => ev.dur > 0);
+  },
+
+  // ════════════════════════════════════════════════════════════════
   //  ACOMPAÑAMIENTO — BLOQUE
   // ════════════════════════════════════════════════════════════════
   //
@@ -988,6 +1238,7 @@ const SessionGenerator = {
   _scaleIntervals: {
     ionian:   [0, 2, 4, 5, 7, 9, 11],
     majpenta: [0, 2, 4, 7, 9],
+    minpenta: [0, 3, 5, 7, 10],
     blues:    [0, 3, 5, 6, 7, 10],
     aeolian:  [0, 2, 3, 5, 7, 8, 10],
   },
@@ -1004,6 +1255,11 @@ const SessionGenerator = {
     return map[rel] != null ? map[rel] : 57;
   },
 
+  _scaleRootMidi(root) {
+    const map = { C: 60, D: 62, E: 64, F: 65, G: 67, A: 57, B: 59 };
+    return map[root] != null ? map[root] : 60;
+  },
+
   // Nota MIDI para un grado (puede ser >= longitud → sube de octava).
   _scaleNote(root, intervals, degree) {
     const n   = intervals.length;
@@ -1013,6 +1269,10 @@ const SessionGenerator = {
   },
 
   _generateMelodic(config, mode, tech, style, diff) {
+    if (config.technique === 'fundamentals') {
+      return this._generateScaleFundamentals(config, mode, tech, style, diff);
+    }
+
     const baseBpm  = Math.round(style.bpm * diff.bpmFactor);
     const finalBpm = clamp(parseInt(config.bpm, 10) || baseBpm, 40, 200);
 
@@ -1066,6 +1326,199 @@ const SessionGenerator = {
         bpm: finalBpm, pending: false,
       },
     };
+  },
+
+  _generateScaleFundamentals(config, mode, tech, style, diff) {
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const bars = this._sectionBarsFor(total);
+    const stages = [
+      { key: 'prep',        label: 'Preparación',  bars: bars.prep },
+      { key: 'build',       label: 'Construcción', bars: bars.build },
+      { key: 'challenge',   label: 'Desafío',      bars: bars.chal },
+      { key: 'application', label: 'Aplicación',   bars: bars.app },
+      { key: 'close',       label: 'Cierre',       bars: bars.close },
+    ];
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    stages.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const built = this._scaleFundamentalMeasure(config, stage.key, b, mi);
+        const seg = { label: built.label, beat: 0, dur: 4 };
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: built.label,
+          chordSegs: [seg],
+          treble: built.treble,
+          bass: built.bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+    const scaleNames = this._scaleNamesForExercise(config);
+    const fifths = (config.meta && config.meta.sharps != null) ? config.meta.sharps : (diff.sharps || 0);
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      measureBeats: 4,
+      origBpm:  finalBpm,
+      fifths,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: 'Escala fundamental', patternKey: 'escala_fundamental',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: fifths,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        scaleNames,
+        scaleKind: (config.meta && config.meta.scaleKind) || '',
+        scaleRoot: (config.meta && config.meta.scaleRoot) || '',
+        compareRoot: (config.meta && config.meta.compareRoot) || '',
+        rhythmic: !!(config.meta && config.meta.rhythmic),
+        hands: (config.meta && config.meta.hands) || '',
+      },
+    };
+  },
+
+  _scaleFundamentalMeasure(config, sectionKey, barInSection, globalIdx) {
+    const spec = this._scaleSpecForExercise(config, sectionKey, barInSection, globalIdx);
+    const root = this._scaleRootMidi(spec.root);
+    const intervals = this._scaleIntervalsForKind(spec.kind);
+    const label = this._scaleLabel(spec.root, spec.kind);
+    const phrase = this._scalePhraseKind(config, sectionKey, barInSection, spec.kind);
+    const treble = this._scalePhrase(root, intervals, phrase);
+    return { label, treble, bass: [] };
+  },
+
+  _scaleSpecForExercise(config, sectionKey, barInSection, globalIdx) {
+    const meta = config.meta || {};
+    const kind = meta.scaleKind || 'major';
+    const root = meta.scaleRoot || 'C';
+    const compareRoot = meta.compareRoot || 'A';
+
+    if (kind === 'compareMajorMinor' || kind === 'majorMinorPiece') {
+      const useMinor = sectionKey === 'challenge' || (sectionKey === 'application' && barInSection % 2 === 1);
+      return useMinor ? { root: compareRoot, kind: 'minor' } : { root, kind: 'major' };
+    }
+
+    if (kind === 'compareScalePentatonic') {
+      const usePenta = sectionKey === 'challenge' || (sectionKey === 'application' && barInSection % 2 === 1);
+      return usePenta ? { root, kind: 'majorPentatonic' } : { root, kind: 'major' };
+    }
+
+    if (kind === 'fundamentalsFinal') {
+      const palette = [
+        { root: 'C', kind: 'major' },
+        { root: 'A', kind: 'minor' },
+        { root: 'G', kind: 'majorPentatonic' },
+        { root: 'E', kind: 'minorPentatonic' },
+        { root: 'D', kind: 'major' },
+        { root: 'B', kind: 'minor' },
+      ];
+      if (sectionKey === 'close') return palette[0];
+      return palette[globalIdx % palette.length];
+    }
+
+    return { root, kind };
+  },
+
+  _scalePhraseKind(config, sectionKey, barInSection, scaleKind) {
+    const rhythmic = !!(config.meta && config.meta.rhythmic);
+    if (sectionKey === 'prep') return 'fragment';
+    if (sectionKey === 'build') return barInSection % 2 === 0 ? 'asc' : 'desc';
+    if (sectionKey === 'challenge') {
+      if (rhythmic) return 'rhythm';
+      return barInSection % 2 === 0 ? 'asc' : 'turn';
+    }
+    if (sectionKey === 'application') return barInSection % 2 === 0 ? 'phraseA' : 'phraseB';
+    return scaleKind === 'minor' || scaleKind === 'minorPentatonic' ? 'minorClose' : 'majorClose';
+  },
+
+  _scaleIntervalsForKind(kind) {
+    if (kind === 'minor') return this._scaleIntervals.aeolian;
+    if (kind === 'majorPentatonic') return this._scaleIntervals.majpenta;
+    if (kind === 'minorPentatonic') return this._scaleIntervals.minpenta;
+    return this._scaleIntervals.ionian;
+  },
+
+  _scaleLabel(root, kind) {
+    if (kind === 'minor') return `${root} Menor natural`;
+    if (kind === 'majorPentatonic') return `${root} Pentatónica mayor`;
+    if (kind === 'minorPentatonic') return `${root} Pentatónica menor`;
+    return `${root} Mayor`;
+  },
+
+  _scaleNamesForExercise(config) {
+    const meta = config.meta || {};
+    const root = meta.scaleRoot || 'C';
+    const compareRoot = meta.compareRoot || 'A';
+    const kind = meta.scaleKind || 'major';
+    if (kind === 'compareMajorMinor' || kind === 'majorMinorPiece') {
+      return [this._scaleLabel(root, 'major'), this._scaleLabel(compareRoot, 'minor')];
+    }
+    if (kind === 'compareScalePentatonic') {
+      return [this._scaleLabel(root, 'major'), this._scaleLabel(root, 'majorPentatonic')];
+    }
+    if (kind === 'fundamentalsFinal') {
+      return ['C Mayor', 'A Menor natural', 'G Pentatónica mayor', 'E Pentatónica menor', 'D Mayor', 'B Menor natural'];
+    }
+    return [this._scaleLabel(root, kind)];
+  },
+
+  _scalePhrase(rootMidi, intervals, phraseKind) {
+    const isPentatonic = intervals.length === 5;
+    const degreeSets = {
+      fragment: isPentatonic ? [0, 1, 2, 3] : [0, 1, 2, 3],
+      asc:      isPentatonic ? [0, 1, 2, 3, 4, 5, 4, 3] : [0, 1, 2, 3, 4, 5, 6, 7],
+      desc:     isPentatonic ? [5, 4, 3, 2, 1, 0, 1, 2] : [7, 6, 5, 4, 3, 2, 1, 0],
+      turn:     isPentatonic ? [0, 1, 2, 4, 3, 2, 1, 0] : [0, 1, 2, 4, 3, 2, 1, 0],
+      phraseA:  isPentatonic ? [0, 2, 3, 4, 3, 2, 1, 0] : [0, 2, 4, 5, 4, 2, 1, 0],
+      phraseB:  isPentatonic ? [4, 3, 2, 1, 0, 1, 2, 0] : [4, 3, 2, 1, 0, 1, 2, 0],
+      majorClose: [2, 1, 0],
+      minorClose: [2, 1, 0],
+    };
+    if (phraseKind === 'rhythm') {
+      return this._melodyFromDegrees(rootMidi, intervals, [
+        { d: 0, dur: 1 }, { d: 1, dur: 0.5 }, { d: 2, dur: 0.5 },
+        { d: 4, dur: 1 }, { d: 2, dur: 0.5 }, { d: 0, dur: 0.5 },
+      ]);
+    }
+    if (phraseKind === 'fragment') {
+      return this._melodyFromDegrees(rootMidi, intervals, degreeSets.fragment.map((d, i) => ({ d, dur: i === 3 ? 1 : 1 })));
+    }
+    if (phraseKind === 'majorClose' || phraseKind === 'minorClose') {
+      return this._melodyFromDegrees(rootMidi, intervals, [
+        { d: 2, dur: 1 }, { d: 1, dur: 1 }, { d: 0, dur: 2 },
+      ]);
+    }
+    return this._melodyFromDegrees(rootMidi, intervals, (degreeSets[phraseKind] || degreeSets.asc).map(d => ({ d, dur: 0.5 })));
+  },
+
+  _melodyFromDegrees(rootMidi, intervals, events) {
+    const treble = [];
+    let beat = 0;
+    events.forEach(ev => {
+      treble.push({ midi: this._scaleNote(rootMidi, intervals, ev.d), beat, duration: ev.dur });
+      beat += ev.dur;
+    });
+    return treble;
   },
 
   // Devuelve { treble, bass, label } para un compás melódico.
