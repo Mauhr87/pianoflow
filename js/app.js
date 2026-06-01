@@ -373,6 +373,7 @@ const App = {
       this.currentPractice = {
         ...item,
         renderedChords: this._uniqueSessionChords(session),
+        renderedScales: session.meta && session.meta.scaleNames,
       };
       Player.loadSession(session);
       this._refreshCompleteBtn();
@@ -559,14 +560,33 @@ const App = {
     }
 
     if (p.mode === 'melodic') {
-      const scaleText = this._scaleList(exerciseChords);
+      const scaleText = this._scaleList(p.renderedScales || exerciseChords);
       const hands = p.meta && p.meta.hands === 'RH' ? 'mano derecha' : 'melodía principal';
       const rhythm = p.meta && p.meta.rhythmic ? ' Aquí el ritmo es parte del objetivo, no solo la sucesión de notas.' : '';
+      const resource = p.meta && (p.meta.melodicResource || p.meta.appliedResource)
+        ? ` Recurso principal: ${p.meta.melodicResource || p.meta.appliedResource}.`
+        : '';
       return [
-        { title: 'Qué estás entrenando', body: `${baseExplain} Trabajas ${scaleText} con foco en ${hands} y una mini aplicación musical dentro del ejercicio.${rhythm}` },
+        { title: 'Qué estás entrenando', body: `${baseExplain} Trabajas ${scaleText} con foco en ${hands} y una mini aplicación musical dentro del ejercicio.${resource}${rhythm}` },
         { title: 'Qué debes escuchar', body: 'La escala debe sonar como vocabulario musical: dirección, llegada y color, no como una lista de notas.' },
         { title: 'Error común', body: 'Subir y bajar la escala mecánicamente sin escuchar dónde descansa la frase o qué emoción produce mayor, menor o pentatónica.' },
         { title: 'Señal de éxito', body: 'Puedes reconocer el color de la escala y tocar la aplicación final como una frase breve con sentido musical.' },
+      ];
+    }
+
+    if (p.mode === 'coordination') {
+      const left = this._coordinationLeftRoleName(p.meta && p.meta.coordinationPattern, p.meta && p.meta.stableBass);
+      const right = p.meta && p.meta.useInversions
+        ? 'acordes completos con inversiones cercanas'
+        : 'acordes completos';
+      const modern = p.meta && (p.meta.useOctaves || p.meta.useTenths)
+        ? ' El reto es mantener el peso de la izquierda sin desordenar la llegada de la derecha.'
+        : '';
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Mano izquierda: ${left}. Mano derecha: ${right}. Usas ${chords}.${modern}` },
+        { title: 'Qué debes escuchar', body: 'La izquierda debe sentirse como base estable y la derecha como armonía clara; ambas manos llegan juntas cuando cambia la función armónica.' },
+        { title: 'Error común', body: 'Pensar solo en las notas y olvidar el rol de cada mano: bajo firme abajo, acorde completo arriba.' },
+        { title: 'Señal de éxito', body: 'Puedes tocar la progresión con cambios sincronizados, sonido equilibrado y sensación de acompañar una canción real.' },
       ];
     }
 
@@ -668,6 +688,20 @@ const App = {
       moduleFinalArpeggios: 'Proyecto final de arpegios',
     };
     return labels[key] || '';
+  },
+
+  _coordinationLeftRoleName(pattern, stableBass) {
+    if (stableBass) return 'bajo estable';
+    const labels = {
+      rootChord: 'fundamental',
+      rootFifthChord: 'fundamental + quinta',
+      independentBass: 'patrón simple de bajo',
+      octavesChord: 'octavas',
+      tenthsChord: 'décimas',
+      modernCoordination: 'recursos modernos de bajo',
+      coordinationFinal: 'fundamental, quinta, octavas y décimas',
+    };
+    return labels[pattern] || 'base armónica';
   },
 
   _triadFamily(chords) {

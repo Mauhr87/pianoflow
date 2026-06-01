@@ -36,6 +36,13 @@ const SessionGenerator = {
       return this._generateMelodic(config, mode, tech, style, diff);
     }
 
+    // ── Currículum fiel: COORDINACIÓN → BAJO + ACORDES ──────────────
+    // LH sostiene base armónica; RH toca acordes completos. La dificultad
+    // crece por coordinación funcional, no por armonía excesiva.
+    if (config.mode === 'coordination' && config.technique === 'bassChords') {
+      return this._generateBassChordsCoordination(config, mode, tech, style, diff);
+    }
+
     // Lectura a primera vista: piezas leíbles (melodía + bajo) que crecen en
     // densidad sección a sección. También camino propio.
     if (config.mode === 'sightreading') {
@@ -934,6 +941,191 @@ const SessionGenerator = {
     return this._generateAccompaniment(config, mode, tech, style, diff);
   },
 
+  // ════════════════════════════════════════════════════════════════
+  //  COORDINACIÓN — BAJO + ACORDES
+  // ════════════════════════════════════════════════════════════════
+
+  _generateBassChordsCoordination(config, mode, tech, style, diff) {
+    const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const useInv = !!(config.meta && config.meta.useInversions);
+    const pattern = (config.meta && config.meta.coordinationPattern) || 'rootChord';
+    const stableBass = !!(config.meta && config.meta.stableBass);
+
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const plan = this._chordStagePlan(total, prog, false);
+
+    let prevMean = null;
+    const chooseVoicing = (label) => {
+      const p = this._parseChord(label);
+      if (!p) return null;
+      const rh = useInv && prevMean !== null
+        ? this._closestChordVoicing(label, prevMean).v
+        : this._chordVoicing(label, 0);
+      prevMean = this._voicingMean(rh);
+      return { rh, parsed: p, root: 36 + p.rootPc };
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = this._coordinationSegments(prog, stage, b);
+        const { treble, bass } = this._coordinationMeasure(segments, chooseVoicing, {
+          pattern,
+          stageKey: stage.key,
+          stableBass,
+          stableLabel: prog[0],
+        });
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble,
+          bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      measureBeats: 4,
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: this._coordinationPatternLabel(pattern), patternKey: pattern,
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        leftRole: this._coordinationLeftRole(pattern, stableBass),
+        rightRole: 'Armonía completa',
+      },
+    };
+  },
+
+  _coordinationSegments(prog, stage, barInStage) {
+    if (stage.key === 'close') return [{ label: prog[0], beat: 0, dur: 4 }];
+    if (stage.key === 'prep') {
+      const label = prog[barInStage % Math.min(2, prog.length)];
+      return [{ label, beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'build') {
+      const subset = prog.slice(0, Math.min(4, prog.length));
+      const label = subset[barInStage % subset.length];
+      return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+    }
+    if (stage.key === 'challenge' && prog.length > stage.bars) {
+      return [
+        { label: prog[(barInStage * 2) % prog.length], beat: 0, dur: 2 },
+        { label: prog[(barInStage * 2 + 1) % prog.length], beat: 2, dur: 2 },
+      ];
+    }
+    if (stage.key === 'application') {
+      const phrase = this._applicationPhrase(prog, stage.bars);
+      const label = phrase[barInStage % phrase.length];
+      return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+    }
+    const label = prog[barInStage % prog.length];
+    return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+  },
+
+  _coordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    const stable = opts.stableBass ? chooseVoicing(opts.stableLabel) : null;
+    segments.forEach(s => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      v.rh.forEach(midi => treble.push({ midi, beat: s.beat, duration: s.dur }));
+      const bassSource = stable || v;
+      const bassEvents = this._coordinationBassEvents(bassSource, s.dur, this._effectiveCoordinationPattern(opts.pattern, opts.stageKey));
+      bassEvents.forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+    });
+    return { treble, bass };
+  },
+
+  _effectiveCoordinationPattern(pattern, stageKey) {
+    if (pattern === 'modernCoordination') {
+      if (stageKey === 'challenge') return 'tenthsChord';
+      if (stageKey === 'application') return 'rootFifthChord';
+      return 'rootChord';
+    }
+    if (pattern === 'coordinationFinal') {
+      if (stageKey === 'prep') return 'rootChord';
+      if (stageKey === 'build') return 'rootFifthChord';
+      if (stageKey === 'challenge') return 'octavesChord';
+      if (stageKey === 'application') return 'tenthsChord';
+      return 'rootChord';
+    }
+    return pattern;
+  },
+
+  _coordinationBassEvents(v, dur, pattern) {
+    if (pattern === 'rootFifthChord' || pattern === 'independentBass') {
+      if (dur >= 2) {
+        return [
+          { midi: v.root, beat: 0, dur: dur / 2 },
+          { midi: v.root + 7, beat: dur / 2, dur: dur / 2 },
+        ];
+      }
+      return [{ midi: v.root, beat: 0, dur }];
+    }
+    if (pattern === 'octavesChord') {
+      return [
+        { midi: v.root, beat: 0, dur },
+        { midi: v.root + 12, beat: 0, dur },
+      ];
+    }
+    if (pattern === 'tenthsChord') {
+      const third = v.parsed && v.parsed.iv && v.parsed.iv[1] != null ? v.parsed.iv[1] : 4;
+      return [
+        { midi: v.root, beat: 0, dur },
+        { midi: v.root + 12 + third, beat: 0, dur },
+      ];
+    }
+    return [{ midi: v.root, beat: 0, dur }];
+  },
+
+  _coordinationPatternLabel(pattern) {
+    const labels = {
+      rootChord: 'Fundamental + acorde',
+      rootFifthChord: 'Fundamental + quinta',
+      independentBass: 'Bajo independiente simple',
+      octavesChord: 'Octavas + acordes',
+      tenthsChord: 'Décimas + acordes',
+      modernCoordination: 'Coordinación moderna',
+      coordinationFinal: 'Dominio de bajo + acordes',
+    };
+    return labels[pattern] || 'Bajo + acordes';
+  },
+
+  _coordinationLeftRole(pattern, stableBass) {
+    if (stableBass) return 'Base armónica estable';
+    if (pattern === 'rootFifthChord' || pattern === 'independentBass') return 'Fundamental + quinta';
+    if (pattern === 'octavesChord') return 'Octavas';
+    if (pattern === 'tenthsChord') return 'Décimas';
+    return 'Fundamental';
+  },
+
   _generateAccompaniment(config, mode, tech, style, diff) {
     const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
     const total = Math.max(5, parseInt(config.bars, 10) || 8);
@@ -1273,6 +1465,10 @@ const SessionGenerator = {
       return this._generateScaleFundamentals(config, mode, tech, style, diff);
     }
 
+    if (config.mode === 'melodic') {
+      return this._generateMelodicCurriculum(config, mode, tech, style, diff);
+    }
+
     const baseBpm  = Math.round(style.bpm * diff.bpmFactor);
     const finalBpm = clamp(parseInt(config.bpm, 10) || baseBpm, 40, 200);
 
@@ -1326,6 +1522,158 @@ const SessionGenerator = {
         bpm: finalBpm, pending: false,
       },
     };
+  },
+
+  _generateMelodicCurriculum(config, mode, tech, style, diff) {
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const bars = this._sectionBarsFor(total);
+    const stages = [
+      { key: 'prep',        label: 'Preparación',  bars: bars.prep },
+      { key: 'build',       label: 'Construcción', bars: bars.build },
+      { key: 'challenge',   label: 'Desafío',      bars: bars.chal },
+      { key: 'application', label: 'Aplicación',   bars: bars.app },
+      { key: 'close',       label: 'Cierre',       bars: bars.close },
+    ];
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    stages.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const built = this._melodicCurriculumMeasure(config, stage.key, b, mi);
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: built.label,
+          chordSegs: [{ label: built.label, beat: 0, dur: 4 }],
+          treble: built.treble,
+          bass: built.bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+    const scaleNames = this._scaleNamesForExercise(config);
+    const fifths = (config.meta && config.meta.sharps != null) ? config.meta.sharps : (diff.sharps || 0);
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      measureBeats: 4,
+      origBpm:  finalBpm,
+      fifths,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: this._melodicPatternLabel(config), patternKey: config.pattern || 'melodic',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: fifths,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        scaleNames,
+        scaleKind: (config.meta && config.meta.scaleKind) || '',
+        scaleRoot: (config.meta && config.meta.scaleRoot) || '',
+        hands: (config.meta && config.meta.hands) || '',
+        melodicResource: (config.meta && (config.meta.melodicResource || config.meta.appliedResource)) || '',
+      },
+    };
+  },
+
+  _melodicCurriculumMeasure(config, sectionKey, barInSection, globalIdx) {
+    const spec = this._scaleSpecForExercise(config, sectionKey, barInSection, globalIdx);
+    const root = this._scaleRootMidi(spec.root);
+    const intervals = this._scaleIntervalsForKind(spec.kind);
+    const scaleLabel = this._scaleLabel(spec.root, spec.kind);
+    const phrase = this._melodicPhraseKind(config, sectionKey, barInSection, globalIdx, spec.kind);
+    const treble = this._scalePhrase(root, intervals, phrase);
+    const chordLabel = this._melodicChordFor(config, sectionKey, globalIdx);
+    const bass = (config.meta && config.meta.melodicLH) ? this._melodicBass(chordLabel, config.technique, sectionKey) : [];
+    const label = chordLabel ? `${chordLabel} / ${scaleLabel}` : scaleLabel;
+    return { label, treble, bass };
+  },
+
+  _melodicPatternLabel(config) {
+    const meta = config.meta || {};
+    return meta.appliedResource || meta.melodicResource || meta.scalePattern || meta.scalePhrase || 'Recurso melódico';
+  },
+
+  _melodicChordFor(config, sectionKey, globalIdx) {
+    const prog = (config.chords && config.chords.length) ? config.chords : [];
+    if (!prog.length) return '';
+    if (sectionKey === 'close') return prog[0];
+    if (config.meta && config.meta.holdChanges) return prog[Math.floor(globalIdx / 2) % prog.length];
+    return prog[globalIdx % prog.length];
+  },
+
+  _melodicBass(chordLabel, techniqueKey, sectionKey) {
+    if (!chordLabel) return [];
+    const p = this._parseChord(chordLabel);
+    if (!p) return [];
+    const root = 36 + p.rootPc;
+    if (techniqueKey === 'phrases' && sectionKey === 'prep') {
+      return [{ midi: root, beat: 0, duration: 4 }];
+    }
+    if (techniqueKey === 'applied' || techniqueKey === 'application' || sectionKey === 'challenge' || sectionKey === 'application') {
+      return [
+        { midi: root, beat: 0, duration: 2 },
+        { midi: root + 7, beat: 2, duration: 2 },
+      ];
+    }
+    return [{ midi: root, beat: 0, duration: 4 }];
+  },
+
+  _melodicPhraseKind(config, sectionKey, barInSection, globalIdx, scaleKind) {
+    const meta = config.meta || {};
+    if (sectionKey === 'close') return scaleKind === 'minor' || scaleKind === 'minorPentatonic' ? 'minorClose' : 'majorClose';
+    if (sectionKey === 'prep') return 'simple';
+
+    if (config.technique === 'phrases') {
+      const k = meta.scalePhrase || 'simple';
+      if (k === 'questionAnswer') return barInSection % 2 === 0 ? 'question' : 'answer';
+      if (k === 'miniMelody') return barInSection % 2 === 0 ? 'phraseA' : 'phraseB';
+      if (k === 'finalPhrases') return ['question', 'answer', 'pentatonicOpen', 'minorPhrase'][globalIdx % 4];
+      return k;
+    }
+
+    if (config.technique === 'patterns') {
+      return this._effectiveScalePattern(meta.scalePattern || 'groups3', sectionKey, globalIdx);
+    }
+
+    const resource = meta.appliedResource || meta.melodicResource || '';
+    if (/Nota|paso/i.test(resource)) return 'passing';
+    if (/Rellen/i.test(resource)) return 'fill';
+    if (/Adorno/i.test(resource)) return 'ornament';
+    if (/Pregunta/i.test(resource)) return barInSection % 2 === 0 ? 'question' : 'answer';
+    if (/Secuencia/i.test(resource)) return sectionKey === 'challenge' ? 'sequenceDown' : 'sequenceUp';
+    if (/Pentat/i.test(resource)) return scaleKind === 'minorPentatonic' ? 'pentatonicMinor' : 'pentatonicOpen';
+    if (/Patr/i.test(resource)) return sectionKey === 'challenge' ? 'controlledLeaps' : 'groups3';
+    if (/Conex/i.test(resource)) return 'connection';
+    if (/Frase/i.test(resource)) return barInSection % 2 === 0 ? 'phraseA' : 'phraseB';
+    return sectionKey === 'application' ? 'phraseA' : 'connection';
+  },
+
+  _effectiveScalePattern(patternKey, sectionKey, globalIdx) {
+    const mixedBasic = () => (sectionKey === 'challenge' || sectionKey === 'application') ? 'thirds' : 'groups3';
+    const mixedIntermediate = () => (sectionKey === 'challenge') ? 'controlledLeaps' : (sectionKey === 'application' ? 'sequenceUp' : 'sequenceDown');
+    const mixedAll = () => ['groups3', 'thirds', 'sequenceUp', 'pentatonicPattern'][globalIdx % 4];
+    const final = () => ['groups3', 'controlledLeaps', 'sequenceDown', 'melodicPattern', 'pentatonicPattern'][globalIdx % 5];
+    if (patternKey === 'mixedBasicPatterns') return mixedBasic();
+    if (patternKey === 'mixedIntermediatePatterns') return mixedIntermediate();
+    if (patternKey === 'mixedAllPatterns') return mixedAll();
+    if (patternKey === 'patternsFinal') return final();
+    return patternKey;
   },
 
   _generateScaleFundamentals(config, mode, tech, style, diff) {
@@ -1436,6 +1784,37 @@ const SessionGenerator = {
       return palette[globalIdx % palette.length];
     }
 
+    if (kind === 'melodicPhrasesFinal' || kind === 'patternsFinal' || kind === 'appliedFinal' || kind === 'applicationFinal') {
+      const palette = [
+        { root: 'C', kind: 'major' },
+        { root: 'A', kind: 'minor' },
+        { root: 'G', kind: 'majorPentatonic' },
+        { root: 'E', kind: 'minorPentatonic' },
+        { root: 'D', kind: 'major' },
+        { root: 'B', kind: 'minor' },
+      ];
+      if (sectionKey === 'close') return palette[0];
+      return palette[globalIdx % palette.length];
+    }
+
+    if (kind === 'applicationPentatonicMix') {
+      return globalIdx % 2 === 0
+        ? { root: 'G', kind: 'majorPentatonic' }
+        : { root: 'E', kind: 'minorPentatonic' };
+    }
+
+    if (kind === 'applicationMajorPenta') {
+      return (sectionKey === 'challenge' || globalIdx % 3 === 0)
+        ? { root: 'G', kind: 'majorPentatonic' }
+        : { root: 'D', kind: 'major' };
+    }
+
+    if (kind === 'applicationMajorMinor') {
+      return globalIdx % 2 === 0
+        ? { root: 'D', kind: 'major' }
+        : { root: 'B', kind: 'minor' };
+    }
+
     return { root, kind };
   },
 
@@ -1479,6 +1858,18 @@ const SessionGenerator = {
     if (kind === 'fundamentalsFinal') {
       return ['C Mayor', 'A Menor natural', 'G Pentatónica mayor', 'E Pentatónica menor', 'D Mayor', 'B Menor natural'];
     }
+    if (kind === 'melodicPhrasesFinal' || kind === 'patternsFinal' || kind === 'appliedFinal' || kind === 'applicationFinal') {
+      return ['C Mayor', 'A Menor natural', 'G Pentatónica mayor', 'E Pentatónica menor', 'D Mayor', 'B Menor natural'];
+    }
+    if (kind === 'applicationPentatonicMix') {
+      return ['G Pentatónica mayor', 'E Pentatónica menor'];
+    }
+    if (kind === 'applicationMajorPenta') {
+      return ['D Mayor', 'G Pentatónica mayor'];
+    }
+    if (kind === 'applicationMajorMinor') {
+      return ['D Mayor', 'B Menor natural'];
+    }
     return [this._scaleLabel(root, kind)];
   },
 
@@ -1491,6 +1882,32 @@ const SessionGenerator = {
       turn:     isPentatonic ? [0, 1, 2, 4, 3, 2, 1, 0] : [0, 1, 2, 4, 3, 2, 1, 0],
       phraseA:  isPentatonic ? [0, 2, 3, 4, 3, 2, 1, 0] : [0, 2, 4, 5, 4, 2, 1, 0],
       phraseB:  isPentatonic ? [4, 3, 2, 1, 0, 1, 2, 0] : [4, 3, 2, 1, 0, 1, 2, 0],
+      simple: [0, 1, 2, 4, 2, 1, 0, 0],
+      ascendingPhrase: [0, 1, 2, 3, 4, 2, 3, 4],
+      descendingPhrase: [5, 4, 3, 2, 1, 3, 2, 0],
+      minorPhrase: [0, 2, 3, 4, 3, 2, 1, 0],
+      question: [0, 1, 2, 4, 4, 3, 2, 4],
+      answer: [4, 3, 2, 1, 2, 1, 0, 0],
+      harmonyPhrase: [0, 2, 4, 5, 4, 2, 1, 0],
+      variedRhythm: [0, 1, 2, 4, 3, 2],
+      pentatonicOpen: [0, 2, 3, 4, 3, 2, 1, 0],
+      pentatonicMinor: [0, 1, 3, 4, 3, 2, 1, 0],
+      extendedMelody: [0, 2, 4, 5, 6, 5, 4, 2],
+      finalPhrases: [0, 2, 4, 5, 4, 2, 1, 0],
+      groups3: [0, 1, 2, 1, 2, 3, 2, 3],
+      groups3Down: [5, 4, 3, 4, 3, 2, 3, 2],
+      thirds: [0, 2, 1, 3, 2, 4, 3, 5],
+      thirdsDown: [5, 3, 4, 2, 3, 1, 2, 0],
+      controlledLeaps: [0, 2, 1, 3, 2, 4, 3, 5],
+      sequenceUp: [0, 1, 2, 1, 2, 3, 2, 3],
+      sequenceDown: [5, 4, 3, 4, 3, 2, 3, 2],
+      pentatonicPattern: [0, 2, 1, 3, 2, 4, 3, 2],
+      pentatonicMinorPattern: [0, 1, 2, 4, 3, 2, 1, 0],
+      melodicPattern: [0, 2, 1, 4, 3, 5, 4, 2],
+      passing: [0, 1, 2, 2, 3, 4, 4, 3],
+      connection: [0, 1, 2, 3, 4, 3, 2, 1],
+      fill: [0, 2, 4, 2, 1, 2, 3, 2],
+      ornament: [2, 3, 2, 1, 0, 1, 0, 0],
       majorClose: [2, 1, 0],
       minorClose: [2, 1, 0],
     };
@@ -1502,6 +1919,12 @@ const SessionGenerator = {
     }
     if (phraseKind === 'fragment') {
       return this._melodyFromDegrees(rootMidi, intervals, degreeSets.fragment.map((d, i) => ({ d, dur: i === 3 ? 1 : 1 })));
+    }
+    if (phraseKind === 'variedRhythm') {
+      return this._melodyFromDegrees(rootMidi, intervals, [
+        { d: 0, dur: 0.5 }, { d: 1, dur: 0.5 }, { d: 2, dur: 1 },
+        { d: 4, dur: 0.5 }, { d: 3, dur: 0.5 }, { d: 2, dur: 1 },
+      ]);
     }
     if (phraseKind === 'majorClose' || phraseKind === 'minorClose') {
       return this._melodyFromDegrees(rootMidi, intervals, [
