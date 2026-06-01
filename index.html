@@ -16,6 +16,7 @@
     <span>Piano<span>Flow</span></span>
   </button>
   <span class="progress-badge" id="progress-badge" hidden>v1</span>
+  <button class="settings-btn" type="button" onclick="App.openSettings()" title="Configuración" aria-label="Configuración">⚙</button>
 </header>
 
 <!-- ── App container ─────────────────────────────────── -->
@@ -24,44 +25,40 @@
   <!-- ─────────────────────── PANTALLA: HOME ─────────────────────── -->
   <section class="screen active" id="screen-home">
     <div class="hero">
-      <div class="eyebrow">Práctica de piano · v1</div>
-      <h1>Elige una familia de acordes para empezar</h1>
-      <p class="lede">Cada sesión te lleva por cinco etapas: preparación, construcción, desafío, aplicación y cierre.</p>
+      <div class="eyebrow">Práctica de piano</div>
+      <h1>Elige un módulo para empezar</h1>
+      <p class="lede">Seis módulos de práctica. Cada ejercicio te lleva por preparación, construcción, desafío, aplicación y cierre.</p>
     </div>
 
-    <div class="family-grid" id="family-grid"><!-- llenado por App.renderFamilies() --></div>
+    <!-- Acceso rápido: seguir practicando + favoritos -->
+    <div class="quick-access" id="quick-access" hidden>
+      <div class="qa-continue" id="qa-continue" hidden></div>
+      <div class="qa-favs" id="qa-favs" hidden></div>
+    </div>
+
+    <div class="mode-grid" id="mode-grid"><!-- llenado por App.renderModes() --></div>
   </section>
 
-  <!-- ─────────────────────── PANTALLA: FAMILIA ─────────────────────── -->
-  <section class="screen" id="screen-family">
+  <!-- ─────────────────────── PANTALLA: MODO ─────────────────────── -->
+  <section class="screen" id="screen-mode">
     <button class="back-btn" type="button" onclick="App.goHome()">← Volver</button>
 
-    <div class="family-head">
-      <div class="family-head-icon" id="family-head-icon">🎵</div>
-      <div class="family-head-body">
-        <div class="eyebrow">Familia</div>
-        <h2 id="family-head-title">—</h2>
-        <p class="lede" id="family-head-desc">—</p>
+    <div class="mode-head">
+      <div class="mode-head-icon" id="mode-head-icon">🎵</div>
+      <div class="mode-head-body">
+        <div class="eyebrow">Modo</div>
+        <h2 id="mode-head-title">—</h2>
+        <p class="lede" id="mode-head-desc">—</p>
+        <span class="progress-track"><span class="progress-fill" id="mode-head-fill" style="width:0%"></span></span>
+        <span class="progress-text" id="mode-head-progress-text">0 / 0 completadas</span>
       </div>
     </div>
 
-    <div class="family-cue" id="family-head-cue"></div>
+    <!-- Tabs por técnica (Todos + cada técnica del módulo) -->
+    <div class="technique-tabs" id="technique-tabs"></div>
 
-    <div class="family-chords-block">
-      <div class="config-label">Acordes</div>
-      <div class="chord-list" id="family-head-chords"></div>
-    </div>
-
-    <!-- Filtro rápido por estilo -->
-    <div class="style-filter" id="style-filter">
-      <button class="filter-pill active" data-filter="all" onclick="App.filterByStyle('all')">Todos</button>
-      <button class="filter-pill" data-filter="worship"    onclick="App.filterByStyle('worship')">🙏 Worship</button>
-      <button class="filter-pill" data-filter="pop"        onclick="App.filterByStyle('pop')">✨ Pop</button>
-      <button class="filter-pill" data-filter="hebrew"     onclick="App.filterByStyle('hebrew')">🕎 Hebreo</button>
-    </div>
-
-    <!-- Lista de prácticas (manifest filtrado) -->
-    <div class="practice-list" id="practice-list"></div>
+    <!-- Lista de ejercicios, agrupados por nivel -->
+    <div class="item-list" id="item-list"></div>
   </section>
 
   <!-- ─────────────────────── PANTALLA: PLAYER ─────────────────────── -->
@@ -72,6 +69,11 @@
         <strong id="player-title">—</strong>
         <small id="player-section">—</small>
       </div>
+      <button class="info-btn" type="button" onclick="App.openInfo()" title="¿Qué practico aquí?" aria-label="Información del ejercicio">i</button>
+      <button class="fav-btn" id="fav-btn" type="button" onclick="App.toggleCurrentFavorite()" title="Añadir a favoritos" aria-label="Favorito">☆</button>
+      <button class="ex-nav-btn" id="prev-ex" type="button" onclick="App.gotoSibling(-1)" title="Ejercicio anterior" aria-label="Ejercicio anterior">‹</button>
+      <button class="ex-nav-btn" id="next-ex" type="button" onclick="App.gotoSibling(1)" title="Ejercicio siguiente" aria-label="Ejercicio siguiente">›</button>
+      <button class="complete-btn" id="complete-btn" type="button" onclick="App.markCurrentComplete()">Marcar completada</button>
     </div>
 
     <!-- Row 1: secciones (horizontal scroll) -->
@@ -101,14 +103,22 @@
 
     <!-- Panel de notas del compás (compacto) -->
     <div class="note-panel">
-      <div class="note-panel-label">Compás actual</div>
-      <div class="note-panel-row">
-        <span class="note-clef treble">𝄞</span>
-        <span id="panel-treble" class="note-chips"><span class="note-chip rest">—</span></span>
+      <div class="note-panel-main">
+        <div class="note-panel-label">Compás actual <span id="panel-inversion" class="inv-badge" hidden></span></div>
+        <div class="note-panel-row">
+          <span class="note-clef treble">𝄞</span>
+          <span id="panel-treble" class="note-chips"><span class="note-chip rest">—</span></span>
+        </div>
+        <div class="note-panel-row">
+          <span class="note-clef bass">𝄢</span>
+          <span id="panel-bass" class="note-chips"><span class="note-chip rest">—</span></span>
+        </div>
       </div>
-      <div class="note-panel-row">
-        <span class="note-clef bass">𝄢</span>
-        <span id="panel-bass" class="note-chips"><span class="note-chip rest">—</span></span>
+      <!-- HUD de seguimiento: racha de aciertos + fallos (modo MIDI) -->
+      <div class="follow-hud" id="follow-hud" hidden>
+        <span class="fh-item fh-hits">✓ <strong id="follow-hits">0</strong> <small>aciertos</small></span>
+        <span class="fh-item fh-streak">🔥 <strong id="follow-streak">0</strong> <small>racha</small></span>
+        <span class="fh-item fh-miss">✗ <strong id="follow-misses">0</strong> <small>fallos</small></span>
       </div>
     </div>
   </section>
@@ -117,15 +127,83 @@
 
 <!-- ── Barra de reproductor (sticky bottom) ──────────── -->
 <div id="player-bar" class="player-bar" hidden>
-  <button id="play-btn" class="play-btn" type="button" onclick="Player.togglePlay()">▶</button>
+  <button id="step-back-btn" class="step-btn" type="button" onclick="Player.stepBack()" title="Paso atrás (←)">⏮</button>
+  <button id="play-btn" class="play-btn" type="button" onclick="Player.togglePlay()" title="Reproducir / pausar (espacio)" aria-label="Reproducir o pausar">▶</button>
+  <button id="step-fwd-btn" class="step-btn" type="button" onclick="Player.stepForward()" title="Paso adelante (→)">⏭</button>
   <div class="bar-copy">
     <strong id="bar-label">—</strong>
     <small id="bar-section">—</small>
   </div>
-  <button id="loop-btn" class="tool-btn" type="button" onclick="Player.toggleSectionLoop()">⟲<small>BUCLE</small></button>
-  <button id="metronome-btn" class="tool-btn" type="button" onclick="Player.toggleMetronome()">♩<small>CLICK</small></button>
-  <button id="hands-btn" class="tool-btn" type="button" onclick="Player.toggleHands()">♬<small>AMBAS</small></button>
-  <button id="speed-btn" class="tool-btn speed" type="button" onclick="App.toggleSpeed()">100%<small>VEL.</small></button>
+  <button id="loop-btn" class="tool-btn" type="button" onclick="Player.toggleSectionLoop()" title="Repetir la sección actual en bucle" aria-label="Bucle de sección">⟲<small>BUCLE</small></button>
+  <button id="metronome-btn" class="tool-btn" type="button" onclick="Player.toggleMetronome()" title="Metrónomo: marca el pulso" aria-label="Metrónomo">♩<small>CLICK</small></button>
+  <button id="hands-btn" class="tool-btn" type="button" onclick="Player.toggleHands()" title="Manos: ambas / derecha / izquierda" aria-label="Selección de manos">♬<small>AMBAS</small></button>
+  <button id="follow-btn" class="tool-btn" type="button" onclick="Player.toggleFollow()" title="Modo seguimiento: toca las notas en tu teclado MIDI" aria-label="Modo seguimiento" hidden>🎵<small>SEGUIR</small></button>
+  <button id="speed-btn" class="tool-btn speed" type="button" onclick="App.toggleSpeed()" title="Velocidad de reproducción" aria-label="Velocidad">100%<small>VEL.</small></button>
+</div>
+
+<!-- ── Modal de información del ejercicio ─────────────── -->
+<div id="info-modal" class="info-modal" hidden onclick="if(event.target===this)App.closeInfo()">
+  <div class="info-card" role="dialog" aria-modal="true">
+    <button class="info-close" type="button" onclick="App.closeInfo()" aria-label="Cerrar">×</button>
+    <div class="info-eyebrow" id="info-eyebrow">Ejercicio</div>
+    <h3 id="info-title">—</h3>
+    <div class="info-meta" id="info-meta">—</div>
+    <p class="info-body" id="info-body">—</p>
+  </div>
+</div>
+
+<!-- ── Drawer de configuración ────────────────────────── -->
+<div id="settings-scrim" class="drawer-scrim" hidden onclick="App.closeSettings()"></div>
+<aside id="settings-drawer" class="drawer" aria-hidden="true">
+  <div class="drawer-head">
+    <strong>Configuración</strong>
+    <button class="drawer-close" type="button" onclick="App.closeSettings()" aria-label="Cerrar">×</button>
+  </div>
+
+  <div class="drawer-section">
+    <label class="drawer-label" for="set-sound">Sonido del piano</label>
+    <select id="set-sound" class="drawer-select" onchange="App.setSound(this.value)"></select>
+    <p class="drawer-hint">Instrumento usado durante la reproducción.</p>
+  </div>
+
+  <div class="drawer-section">
+    <label class="drawer-toggle">
+      <span>
+        <span class="drawer-toggle-title">MIDI para modo seguimiento</span>
+        <span class="drawer-hint">Conecta un teclado MIDI para seguir los ejercicios.</span>
+      </span>
+      <input type="checkbox" id="set-midi" onchange="App.setMidiFollow(this.checked)">
+    </label>
+    <p class="drawer-hint" id="set-midi-status"></p>
+  </div>
+
+  <div class="drawer-section">
+    <label class="drawer-toggle">
+      <span>
+        <span class="drawer-toggle-title">Sonar MIDI en la app</span>
+        <span class="drawer-hint">Reproduce el sonido del piano cuando tocas en modo seguimiento. Desactívalo si prefieres escuchar solo tu instrumento.</span>
+      </span>
+      <input type="checkbox" id="set-midi-sound" onchange="App.setMidiSound(this.checked)">
+    </label>
+  </div>
+
+  <div class="drawer-section">
+    <label class="drawer-toggle">
+      <span>
+        <span class="drawer-toggle-title">Conteo inicial</span>
+        <span class="drawer-hint">Un compás de metrónomo (4 clics) antes de empezar a reproducir.</span>
+      </span>
+      <input type="checkbox" id="set-countin" onchange="App.setCountIn(this.checked)">
+    </label>
+  </div>
+</aside>
+
+<!-- ── Overlay de celebración ─────────────────────────── -->
+<div id="celebrate" class="celebrate" hidden aria-hidden="true">
+  <div class="celebrate-card">
+    <span class="celebrate-check">✓</span>
+    <span class="celebrate-text">¡Bien hecho!</span>
+  </div>
 </div>
 
 <!-- ── Toast ──────────────────────────────────────────── -->
@@ -138,6 +216,7 @@
 <script src="js/storage.js"></script>
 <script src="js/piano-engine.js"></script>
 <script src="js/audio-engine.js"></script>
+<script src="js/midi-engine.js"></script>
 <script src="js/notation-engine.js"></script>
 <script src="js/session-generator.js"></script>
 <script src="js/player.js"></script>

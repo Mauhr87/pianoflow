@@ -135,6 +135,105 @@ const PatternLibrary = {
     ],
   },
 
+  // ── Síncopa — acordes anticipados, acentos a contratiempo ──────────
+  sincopa: {
+    label: 'Síncopa',
+    icon: '🔀',
+    desc: 'Acordes anticipados: acentos a contratiempo sobre un bajo firme.',
+    sequence: [
+      { lh: 'root',  rh: 'triad', dur: 0.5 },   // 0
+      {              rh: 'triad', dur: 0.5 },   // 0.5
+      {                           dur: 0.5 },   // 1.0 (respira)
+      {              rh: 'triad', dur: 0.5 },   // 1.5 (anticipa)
+      { lh: 'fifth',              dur: 0.5 },   // 2.0
+      {              rh: 'triad', dur: 0.5 },   // 2.5
+      {                           dur: 0.5 },   // 3.0
+      {              rh: 'triad', dur: 0.5 },   // 3.5 (anticipa)
+    ],
+  },
+
+  // ── Inversiones — recorrer fundamental, 1ª y 2ª inversión ──────────
+  inversiones: {
+    label: 'Inversiones',
+    icon: '🔁',
+    desc: 'Recorre el acorde en estado fundamental, 1ª y 2ª inversión.',
+    sequence: [
+      { lh: 'root',  rh: 'triad',   dur: 1 },   // fundamental
+      { lh: 'fifth', rh: 'triad^',  dur: 1 },   // 1ª inversión
+      { lh: 'root',  rh: 'triad^^', dur: 1 },   // 2ª inversión
+      { lh: 'fifth', rh: 'triad',   dur: 1 },   // vuelve
+    ],
+  },
+
+  // ── Décimas — LH abierta bajo el arpegio de la derecha ─────────────
+  decimas: {
+    label: 'Décimas',
+    icon: '🎼',
+    desc: 'LH abre a una décima/octava+quinta bajo el arpegio de la derecha.',
+    sequence: [
+      { lh: 'root',     rh: 't3', dur: 0.5 },
+      { lh: 'fifth+12', rh: 't4', dur: 0.5 },
+      {                 rh: 't5', dur: 0.5 },
+      {                 rh: 't6', dur: 0.5 },
+      { lh: 'root',     rh: 't5', dur: 0.5 },
+      { lh: 'fifth+12', rh: 't4', dur: 0.5 },
+      {                 rh: 't5', dur: 0.5 },
+      {                 rh: 't6', dur: 0.5 },
+    ],
+  },
+
+  // ── Cruzados — la LH cruza sobre la RH a notas agudas ──────────────
+  cruzados: {
+    label: 'Cruzados',
+    icon: '✋',
+    desc: 'La LH cruza sobre la RH para tocar notas agudas del acorde.',
+    sequence: [
+      { lh: 'root',  rh: 't3', dur: 0.5 },
+      {              rh: 't4', dur: 0.5 },
+      { lh: 't8',    rh: 't5', dur: 0.5 },   // cruce agudo
+      {              rh: 't4', dur: 0.5 },
+      { lh: 'fifth', rh: 't3', dur: 0.5 },
+      {              rh: 't4', dur: 0.5 },
+      { lh: 't7',    rh: 't5', dur: 0.5 },   // cruce agudo
+      {              rh: 't4', dur: 0.5 },
+    ],
+  },
+
+  // ── Síncopa entre manos — LH firme, RH anticipa a contratiempo ─────
+  sincopa_manos: {
+    label: 'Síncopa entre manos',
+    icon: '🔀',
+    desc: 'LH marca pulsos firmes mientras la RH anticipa a contratiempo.',
+    sequence: [
+      { lh: 'root',  rh: 'triad', dur: 0.5 },   // juntas
+      {              rh: 'triad', dur: 0.5 },   // RH and-1
+      { lh: 'fifth',              dur: 0.5 },   // LH beat2
+      {              rh: 'triad', dur: 0.5 },   // RH and-2
+      { lh: 'root',               dur: 0.5 },   // LH beat3
+      {              rh: 'triad', dur: 0.5 },   // RH and-3
+      { lh: 'fifth',              dur: 0.5 },   // LH beat4
+      {              rh: 'triad', dur: 0.5 },   // RH and-4
+    ],
+  },
+
+  // ── Polirritmia 2-vs-3 — LH en negras, RH en tresillos de negra ────
+  // RH: 3 notas por cada 2 pulsos (tresillo de negra). LH: 2 negras.
+  polirritmia_23: {
+    label: 'Polirritmia 2-vs-3',
+    icon: '🌀',
+    desc: 'Dos contra tres: LH en negras mientras la RH toca tresillos de negra.',
+    sequence: [
+      { lh: 'root',  rh: 't3', dur: 2 / 3 },   // beat 0
+      {              rh: 't4', dur: 1 / 3 },   // beat 2/3
+      { lh: 'fifth',           dur: 1 / 3 },   // beat 1
+      {              rh: 't5', dur: 2 / 3 },   // beat 4/3
+      { lh: 'root',  rh: 't3', dur: 2 / 3 },   // beat 2
+      {              rh: 't4', dur: 1 / 3 },   // beat 8/3
+      { lh: 'fifth',           dur: 1 / 3 },   // beat 3
+      {              rh: 't5', dur: 2 / 3 },   // beat 10/3
+    ],
+  },
+
 };
 
 // ── Catálogo por estilo: qué patrones se ofrecen por defecto ──────

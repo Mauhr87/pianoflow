@@ -65,6 +65,11 @@ const ChordLibrary = {
     rhTriad: [59, 62, 66],
     tones:   [47, 54, 59, 62, 66, 71, 74, 78, 83] },
 
+  'F#m': { label: 'F#m', name: 'Fa# menor',
+    rootBass: 42, altBass: 49,
+    rhTriad: [66, 69, 73],
+    tones:   [42, 49, 54, 57, 61, 66, 69, 73, 78, 81] },
+
   // ── Familia: Worship moderno ────────────────────────────────────────
 
   'Csus2': { label: 'Csus2', name: 'Do sus2',
@@ -109,6 +114,18 @@ const ChordLibrary = {
     rootBass: 45, altBass: 52,
     rhTriad: [57, 60, 64, 67],
     tones:   [45, 52, 57, 60, 64, 67, 69, 72, 76, 79, 81] },
+
+  // B mayor — dominante frigia sobre Mi menor (tonalidad intermedio)
+  'B':   { label: 'B', name: 'Si mayor (dominante)',
+    rootBass: 47, altBass: 54,
+    rhTriad: [59, 63, 66],
+    tones:   [47, 54, 59, 63, 66, 71, 75, 78] },
+
+  // F# mayor — dominante frigia sobre Si menor (tonalidad avanzado)
+  'F#':  { label: 'F#', name: 'Fa# mayor (dominante)',
+    rootBass: 42, altBass: 49,
+    rhTriad: [54, 58, 61],
+    tones:   [42, 49, 54, 58, 61, 66, 70, 73] },
 
   // ── Familia: Séptimas pop ──────────────────────────────────────────
 

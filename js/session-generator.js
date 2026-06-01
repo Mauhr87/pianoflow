@@ -21,17 +21,59 @@
 const SessionGenerator = {
 
   generate(config) {
-    const family   = PracticeLibrary.getFamily(config.family);
-    const style    = PracticeLibrary.getStyle(config.style);
-    const diff     = PracticeLibrary.getDifficulty(config.difficulty);
-    const pattern  = PatternLibrary.get(config.pattern);
+    const mode   = PracticeLibrary.getMode(config.mode);
+    const tech   = PracticeLibrary.getTechnique(config.mode, config.technique);
+    const style  = PracticeLibrary.getStyle(config.style);
+    const diff   = PracticeLibrary.getDifficulty(config.difficulty);
 
-    if (!family || !style || !diff || !pattern) {
-      throw new Error('Config inválida: faltan family/style/difficulty/pattern');
+    if (!mode || !tech || !style || !diff) {
+      throw new Error('Config inválida: faltan mode/technique/style/difficulty');
     }
 
-    const progBank   = family.progressions[config.style][config.difficulty];
-    const progression = progBank[0]; // por ahora siempre la primera variante
+    // El modo melódico no usa el sistema de patrones sobre acordes: genera
+    // escalas/figuras a partir de la tónica del nivel (camino propio).
+    if (config.mode === 'melodic') {
+      return this._generateMelodic(config, mode, tech, style, diff);
+    }
+
+    // Lectura a primera vista: piezas leíbles (melodía + bajo) que crecen en
+    // densidad sección a sección. También camino propio.
+    if (config.mode === 'sightreading') {
+      return this._generateSightreading(config, mode, tech, style, diff);
+    }
+
+    // ── Currículum fiel: ACORDES → TRIADAS ──────────────────────────
+    // Cada ejercicio usa SUS propios acordes y subdivide la pieza en 5
+    // etapas pedagógicas (no rangos arbitrarios de compás).
+    if (config.mode === 'chords' && config.technique === 'triads') {
+      return this._generateTriads(config, mode, tech, style, diff);
+    }
+
+    // ── Currículum fiel: ACORDES → INVERSIONES ──────────────────────
+    if (config.mode === 'chords' && config.technique === 'inversions') {
+      return this._generateInversions(config, mode, tech, style, diff);
+    }
+
+    // ── Currículum fiel: ACORDES → SÉPTIMAS / EXTENSIONES / APLICACIÓN ─
+    // Todas usan acordes en bloque construidos por nombre (séptimas
+    // Maj7/m7/7, extensiones add9/sus2/sus4 y mini-canciones que integran
+    // triadas + inversiones + séptimas + extensiones según el ejercicio).
+    if (config.mode === 'chords' &&
+        (config.technique === 'sevenths' ||
+         config.technique === 'extensions' ||
+         config.technique === 'application')) {
+      return this._generateBlockChords(config, mode, tech, style, diff);
+    }
+
+    const patternKey = config.pattern || (tech && tech.pattern) || 'bloque';
+    const pattern    = PatternLibrary.get(patternKey);
+    if (!pattern) {
+      throw new Error('Config inválida: patrón no encontrado (' + patternKey + ')');
+    }
+
+    // La tonalidad sale del nivel (Opción C). La progresión se arma con los
+    // acordes diatónicos de esa tonalidad según el estilo.
+    const progression = this._progressionFor(config.style, config.difficulty);
 
     const baseBpm  = Math.round(style.bpm * diff.bpmFactor);
     const finalBpm = clamp(parseInt(config.bpm, 10) || baseBpm, 40, 200);
@@ -76,25 +118,555 @@ const SessionGenerator = {
       });
     });
 
+    const keyLabel = `${diff.tonic} ${diff.mode === 'major' ? 'mayor' : 'menor'} / ${diff.rel}`;
+
     return {
-      title:    `${family.label} · ${style.label}`,
-      subtitle: `${pattern.label} · ${diff.label} · ${finalBpm} BPM`,
+      title:    `${mode.label} · ${tech.label}`,
+      subtitle: `${style.label} · ${keyLabel} · ${finalBpm} BPM`,
       timeSig:  '4/4',
       origBpm:  finalBpm,
+      fifths:   diff.sharps || 0,
       measures,
       sections: sectionMeta,
       meta: {
-        family:     family.label,
-        familyKey:  config.family,
-        style:      style.label,
-        styleKey:   config.style,
-        pattern:    pattern.label,
-        patternKey: config.pattern,
-        difficulty: diff.label,
-        diffKey:    config.difficulty,
-        bpm:        finalBpm,
+        mode:        mode.label,
+        modeKey:     config.mode,
+        technique:   tech.label,
+        techniqueKey:config.technique,
+        style:       style.label,
+        styleKey:    config.style,
+        pattern:     pattern.label,
+        patternKey:  patternKey,
+        difficulty:  diff.label,
+        diffKey:     config.difficulty,
+        tonic:       diff.tonic,
+        rel:         diff.rel,
+        sharps:      diff.sharps || 0,
+        bpm:         finalBpm,
+        pending:     !!tech.pending,
       },
     };
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  ACORDES — TRIADAS (currículum fiel)
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Toma los acordes del ejercicio (config.chords) y los reparte en las
+  // 5 etapas de aprendizaje según nuevo-enfoque.md:
+  //   Preparación  ~20%  presentar la habilidad (1-2 acordes, bloque calmo)
+  //   Construcción ~30%  progresión sencilla (subconjunto), pulso 1 y 3
+  //   Desafío      ~30%  progresión completa / cambios más frecuentes
+  //   Aplicación   ~15%  frase musical con la progresión, cierre lírico
+  //   Cierre       ~5%   resolución a la tónica (redonda)
+  //
+  // Reglas de la técnica: acordes en bloque, posición fundamental,
+  // sin inversiones, sin séptimas ni extensiones.
+
+  _generateTriads(config, mode, tech, style, diff) {
+    const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const fast  = !!(config.meta && config.meta.fastChanges);
+
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+
+    // Reparto de compases por etapa (Cierre siempre 1; resto por ratio).
+    const close = 1;
+    const rem   = total - close;
+    let prep  = Math.max(1, Math.round(rem * 0.21));
+    let build = Math.max(1, Math.round(rem * 0.32));
+    let chal  = Math.max(1, Math.round(rem * 0.32));
+    let app   = rem - (prep + build + chal);
+    while (app < 1) { if (build > 1) build--; else if (chal > 1) chal--; else if (prep > 1) prep--; else break; app = rem - (prep + build + chal); }
+
+    const plan = [
+      { key: 'prep',        label: 'Preparación',  bars: prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
+      { key: 'build',       label: 'Construcción', bars: build, build: (i)    => this._triBarsBuild(prog, i) },
+      { key: 'challenge',   label: 'Desafío',      bars: chal,  build: (i)    => this._triBarsChallenge(prog, i, fast) },
+      { key: 'application', label: 'Aplicación',   bars: app,   build: (i, n) => this._triBarsApply(prog, i, n) },
+      { key: 'close',       label: 'Cierre',       bars: close, build: (i, n) => this._triBarsClose(prog, i, n) },
+    ];
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = stage.build(b, stage.bars);
+        const { treble, bass } = this._blockMeasure(segments);
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble,
+          bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      origBpm:  finalBpm,
+      fifths:   0,                         // acordes explícitos → sin armadura global
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: 'Bloque', patternKey: 'bloque',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+      },
+    };
+  },
+
+  // Etapas (devuelven segmentos [{ label, beat, dur }] que suman 4 pulsos):
+
+  // Preparación: 1-2 acordes, una redonda por compás (mínima carga).
+  _triBarsPrep(prog, i, n) {
+    const a = prog[0];
+    const b = prog[1 % prog.length] || a;
+    const label = (i < Math.ceil(n / 2)) ? a : b;
+    return [{ label, beat: 0, dur: 4 }];
+  },
+
+  // Construcción: subconjunto de la progresión, bloques en tiempos 1 y 3.
+  _triBarsBuild(prog, i) {
+    const subset = prog.slice(0, Math.min(4, prog.length));
+    const label = subset[i % subset.length];
+    return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+  },
+
+  // Desafío: progresión completa. Cambios más frecuentes (dos acordes por
+  // compás) en los ejercicios marcados fastChanges; si no, bloques 1 y 3.
+  _triBarsChallenge(prog, i, fast) {
+    if (fast) {
+      const a = prog[(2 * i) % prog.length];
+      const b = prog[(2 * i + 1) % prog.length];
+      return [{ label: a, beat: 0, dur: 2 }, { label: b, beat: 2, dur: 2 }];
+    }
+    const label = prog[i % prog.length];
+    return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+  },
+
+  // Aplicación: frase con la progresión; último compás se sostiene (lírico).
+  _triBarsApply(prog, i, n) {
+    const label = prog[i % prog.length];
+    if (i === n - 1) return [{ label, beat: 0, dur: 4 }];
+    return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+  },
+
+  // Cierre: resolución a la tónica (primer acorde) como redonda.
+  _triBarsClose(prog, i, n) {
+    return [{ label: prog[0], beat: 0, dur: 4 }];
+  },
+
+  // Tríada en POSICIÓN FUNDAMENTAL (raíz–tercera–quinta) en la octava de
+  // RH. No se usa chord.rhTriad porque sus voicings están invertidos para
+  // suavizar el enlace; la técnica de triadas exige fundamental.
+  _rootTriad(label) {
+    const chord = ChordLibrary.get(label);
+    if (!chord) return null;
+    const rootPc = ((chord.rootBass % 12) + 12) % 12;       // clase de altura de la raíz
+    const root   = 60 + rootPc;                              // raíz en octava 4 (C4–B4)
+    const third  = /m$/.test(label) ? 3 : 4;                // menor (termina en m) vs mayor
+    return [root, root + third, root + 7];                  // raíz, 3ª, 5ª
+  },
+
+  // Construye treble (tríada en bloque, fundamental) + bass (raíz) de un
+  // compás a partir de segmentos { label, beat, dur }.
+  _blockMeasure(segments) {
+    const treble = [];
+    const bass   = [];
+    segments.forEach(s => {
+      const chord = ChordLibrary.get(s.label);
+      const triad = this._rootTriad(s.label);
+      if (!chord || !triad) return;
+      triad.forEach(midi => treble.push({ midi, beat: s.beat, duration: s.dur }));
+      bass.push({ midi: chord.rootBass, beat: s.beat, duration: s.dur });
+    });
+    return { treble, bass };
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  ACORDES — INVERSIONES (currículum fiel)
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Misma estructura de 5 etapas y misma distribución que Triadas. La
+  // nueva habilidad es la INVERSIÓN: la tríada de la mano derecha se
+  // presenta en fundamental, 1ª o 2ª inversión y la mano izquierda toca
+  // la nota MÁS GRAVE de esa posición (así "la tercera/quinta queda como
+  // nota más grave", como dice el currículum).
+  //
+  // Tres comportamientos según el ejercicio:
+  //   meta.inv = 1|2        → un solo acorde, siempre esa inversión (e1, e2)
+  //   meta.useInversions    → elige la inversión MÁS CERCANA (mínimo
+  //                           movimiento) respecto al acorde anterior
+  //   resto (comparación)   → cicla fundamental → 1ª → 2ª (e3)
+  //
+  // Sin séptimas, add9, sus ni voicings abiertos: solo tríadas.
+
+  _generateInversions(config, mode, tech, style, diff) {
+    const prog  = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const fast  = !!(config.meta && config.meta.fastChanges);
+    const fixedInv = (config.meta && config.meta.inv) || 0;   // e1=1, e2=2
+    const useInv   = !!(config.meta && config.meta.useInversions);
+
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+
+    const close = 1;
+    const rem   = total - close;
+    let prep  = Math.max(1, Math.round(rem * 0.21));
+    let build = Math.max(1, Math.round(rem * 0.32));
+    let chal  = Math.max(1, Math.round(rem * 0.32));
+    let app   = rem - (prep + build + chal);
+    while (app < 1) { if (build > 1) build--; else if (chal > 1) chal--; else if (prep > 1) prep--; else break; app = rem - (prep + build + chal); }
+
+    const plan = [
+      { key: 'prep',        label: 'Preparación',  bars: prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
+      { key: 'build',       label: 'Construcción', bars: build, build: (i)    => this._triBarsBuild(prog, i) },
+      { key: 'challenge',   label: 'Desafío',      bars: chal,  build: (i)    => this._triBarsChallenge(prog, i, fast) },
+      { key: 'application', label: 'Aplicación',   bars: app,   build: (i, n) => this._triBarsApply(prog, i, n) },
+      { key: 'close',       label: 'Cierre',       bars: close, build: (i, n) => this._triBarsClose(prog, i, n) },
+    ];
+
+    // Selector de voicing con estado (recorre los segmentos en orden).
+    let prevMean = null;
+    let cmpIdx   = 0;
+    const lastByLabel = {};
+    const chooseVoicing = (label) => {
+      let v;
+      if (useInv) {
+        v = (prevMean === null)
+          ? this._triadVoicing(label, 0)
+          : this._closestInversion(label, prevMean).v;
+      } else if (fixedInv) {
+        v = this._triadVoicing(label, fixedInv);
+      } else {
+        // Comparación: misma posición para repeticiones del mismo acorde
+        // dentro del compás; avanza fundamental→1ª→2ª al cambiar de acorde.
+        if (lastByLabel[label] !== undefined && lastByLabel._last === label) {
+          v = this._triadVoicing(label, lastByLabel[label]);
+        } else {
+          const inv = cmpIdx % 3; cmpIdx++;
+          lastByLabel[label] = inv;
+          v = this._triadVoicing(label, inv);
+        }
+        lastByLabel._last = label;
+      }
+      prevMean = this._voicingMean(v);
+      return v;
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = stage.build(b, stage.bars);
+        const { treble, bass } = this._invMeasure(segments, chooseVoicing);
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble,
+          bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: 'Bloque', patternKey: 'bloque',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+      },
+    };
+  },
+
+  // Tríada en una inversión dada (0=fundamental, 1=1ª, 2=2ª), sobre la
+  // octava de RH. Construida a partir de la fundamental de _rootTriad.
+  _triadVoicing(label, inv) {
+    const t = this._rootTriad(label);
+    if (!t) return null;
+    const [r, th, f] = t;
+    if (inv === 1) return [th, f, r + 12];          // 3ª como nota más grave
+    if (inv === 2) return [f, r + 12, th + 12];     // 5ª como nota más grave
+    return [r, th, f];                              // fundamental
+  },
+
+  _voicingMean(v) {
+    return v.reduce((a, b) => a + b, 0) / v.length;
+  },
+
+  // Colapsa segmentos consecutivos del mismo acorde en una sola etiqueta
+  // por cambio de acorde, conservando el beat donde ocurre. Así "F F" se
+  // muestra como una sola "F", y "C G" muestra "C" en el pulso 1 y "G" en
+  // el pulso 3, cada una alineada con su acorde.
+  _collapseSegs(segments) {
+    const out = [];
+    segments.forEach(s => {
+      if (!out.length || out[out.length - 1].label !== s.label) {
+        out.push({ label: s.label, beat: s.beat });
+      }
+    });
+    return out;
+  },
+
+  // Elige la inversión cuyo centro tonal queda más cerca del acorde
+  // anterior (mínimo movimiento de la mano).
+  _closestInversion(label, prevMean) {
+    let best = null, bestDist = Infinity;
+    for (let inv = 0; inv < 3; inv++) {
+      const v = this._triadVoicing(label, inv);
+      if (!v) continue;
+      const d = Math.abs(this._voicingMean(v) - prevMean);
+      if (d < bestDist) { bestDist = d; best = { inv, v }; }
+    }
+    return best || { inv: 0, v: this._triadVoicing(label, 0) };
+  },
+
+  // Compás de inversiones: RH = voicing elegido; LH = nota más grave del
+  // voicing bajada una octava (así la inversión se oye de verdad).
+  _invMeasure(segments, chooseVoicing) {
+    const treble = [];
+    const bass   = [];
+    segments.forEach(s => {
+      const v = chooseVoicing(s.label);
+      if (!v) return;
+      v.forEach(midi => treble.push({ midi, beat: s.beat, duration: s.dur }));
+      bass.push({ midi: Math.min.apply(null, v) - 12, beat: s.beat, duration: s.dur });
+    });
+    return { treble, bass };
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  ACORDES — SÉPTIMAS y EXTENSIONES (currículum fiel)
+  // ════════════════════════════════════════════════════════════════
+  //
+  // Acordes en bloque construidos a partir del nombre (Maj7/m7/7 para
+  // séptimas; add9/sus2/sus4 para extensiones). Misma estructura de 5
+  // etapas. La nueva habilidad es la sonoridad; la dificultad no viene
+  // del ritmo.
+  //
+  //   meta.useInversions → la mano derecha elige el voicing (inversión)
+  //                        más cercano al acorde anterior.
+  // La mano izquierda siempre toca la fundamental, para que el color del
+  // acorde se reconozca con claridad. Sin voicings abiertos ni pedales.
+
+  _generateBlockChords(config, mode, tech, style, diff) {
+    const prog  = (config.chords && config.chords.length) ? config.chords.slice() : ['Cmaj7'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const fast  = !!(config.meta && config.meta.fastChanges);
+    const useInv = !!(config.meta && config.meta.useInversions);
+    // Solo en Aplicación Musical: el Desafío late en negras (RH) sobre una
+    // izquierda sostenida, para que la pieza se sienta como canción. No es
+    // independencia de manos: ambas tocan la misma armonía, la derecha solo
+    // pulsa. En las demás técnicas el ritmo se mantiene neutro.
+    const pulse = (config.technique === 'application');
+
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+
+    const close = 1;
+    const rem   = total - close;
+    let prep  = Math.max(1, Math.round(rem * 0.21));
+    let build = Math.max(1, Math.round(rem * 0.32));
+    let chal  = Math.max(1, Math.round(rem * 0.32));
+    let app   = rem - (prep + build + chal);
+    while (app < 1) { if (build > 1) build--; else if (chal > 1) chal--; else if (prep > 1) prep--; else break; app = rem - (prep + build + chal); }
+
+    const plan = [
+      { key: 'prep',        label: 'Preparación',  bars: prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
+      { key: 'build',       label: 'Construcción', bars: build, build: (i)    => this._triBarsBuild(prog, i) },
+      { key: 'challenge',   label: 'Desafío',      bars: chal,  build: (i)    => this._triBarsChallenge(prog, i, fast) },
+      { key: 'application', label: 'Aplicación',   bars: app,   build: (i, n) => this._triBarsApply(prog, i, n) },
+      { key: 'close',       label: 'Cierre',       bars: close, build: (i, n) => this._triBarsClose(prog, i, n) },
+    ];
+
+    let prevMean = null;
+    const chooseVoicing = (label) => {
+      const p = this._parseChord(label);
+      if (!p) return null;
+      const root = 36 + p.rootPc;                  // fundamental en octava 2
+      let rh;
+      if (useInv) {
+        rh = (prevMean === null)
+          ? this._chordVoicing(label, 0)
+          : this._closestChordVoicing(label, prevMean).v;
+      } else {
+        rh = this._chordVoicing(label, 0);
+      }
+      prevMean = this._voicingMean(rh);
+      return { rh, root };
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = stage.build(b, stage.bars);
+        const treble = [], bass = [];
+        const pulseHere = pulse && stage.key === 'challenge';
+        segments.forEach(s => {
+          const v = chooseVoicing(s.label);
+          if (!v) return;
+          if (pulseHere) {
+            // RH en negras (una por pulso que abarca el segmento); LH sostiene
+            // el acorde durante todo el segmento (blanca/redonda).
+            for (let q = 0; q < s.dur; q++) {
+              v.rh.forEach(midi => treble.push({ midi, beat: s.beat + q, duration: 1 }));
+            }
+            bass.push({ midi: v.root, beat: s.beat, duration: s.dur });
+          } else {
+            v.rh.forEach(midi => treble.push({ midi, beat: s.beat, duration: s.dur }));
+            bass.push({ midi: v.root, beat: s.beat, duration: s.dur });
+          }
+        });
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble,
+          bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: 'Bloque', patternKey: 'bloque',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+      },
+    };
+  },
+
+  // Parsea un nombre de acorde → { rootPc, iv } donde iv son los
+  // intervalos (semitonos) desde la fundamental. Cubre triadas y séptimas.
+  _NOTE_PC: { C:0, 'C#':1, D:2, 'D#':3, E:4, F:5, 'F#':6, G:7, 'G#':8, A:9, 'A#':10, B:11 },
+  _parseChord(label) {
+    const m = String(label).match(/^([A-G]#?)(.*)$/);
+    if (!m) return null;
+    const rootPc = this._NOTE_PC[m[1]];
+    if (rootPc == null) return null;
+    const q = m[2];
+    let iv;
+    if      (q === 'maj7') iv = [0, 4, 7, 11];
+    else if (q === 'm7')   iv = [0, 3, 7, 10];
+    else if (q === '7')    iv = [0, 4, 7, 10];
+    else if (q === 'add9') iv = [0, 4, 7, 14];   // triada mayor + 9ª
+    else if (q === 'sus2') iv = [0, 2, 7];       // 3ª → 2ª
+    else if (q === 'sus4') iv = [0, 5, 7];       // 3ª → 4ª
+    else if (q === 'm')    iv = [0, 3, 7];
+    else if (q === '')     iv = [0, 4, 7];
+    else return null;
+    return { rootPc, iv };
+  },
+
+  // Voicing del acorde (fundamental u otra inversión) en la octava de RH.
+  _chordVoicing(label, inv) {
+    const p = this._parseChord(label);
+    if (!p) return null;
+    const notes = p.iv.map(x => 60 + p.rootPc + x);   // posición fundamental, octava 4
+    for (let k = 0; k < (inv || 0); k++) notes.push(notes.shift() + 12);
+    return notes;
+  },
+
+  _closestChordVoicing(label, prevMean) {
+    const p = this._parseChord(label);
+    if (!p) return { inv: 0, v: this._chordVoicing(label, 0) };
+    let best = null, bd = Infinity;
+    for (let inv = 0; inv < p.iv.length; inv++) {
+      const v = this._chordVoicing(label, inv);
+      const d = Math.abs(this._voicingMean(v) - prevMean);
+      if (d < bd) { bd = d; best = { inv, v }; }
+    }
+    return best;
+  },
+
+  // ── Progresión por estilo, derivada de la tonalidad del nivel ──────
+  //
+  // Acordes diatónicos por tonalidad (Opción C). domMin = dominante frigia
+  // del relativo menor (la tensión hacia la tónica menor: E→Am, B→Em, F#→Bm).
+  _keyChords: {
+    basic:        { I: 'C', IV: 'F', V: 'G', vi: 'Am', ii: 'Dm', domMin: 'E'  },
+    intermediate: { I: 'G', IV: 'C', V: 'D', vi: 'Em', ii: 'Am', domMin: 'B'  },
+    advanced:     { I: 'D', IV: 'G', V: 'A', vi: 'Bm', ii: 'Em', domMin: 'F#' },
+  },
+
+  // Plantillas por estilo (grados → acordes de la tonalidad activa):
+  //   worship : I–V–vi–IV   (clásico de adoración)
+  //   pop     : vi–IV–I–V   (gancho pop)
+  //   hebrew  : vi–V–IV–domMin  (cadencia andaluza / sabor frigio en relativo menor)
+  _progressionFor(styleKey, diffKey) {
+    const k = this._keyChords[diffKey] || this._keyChords.basic;
+    const templates = {
+      worship: [k.I,  k.V,  k.vi, k.IV],
+      pop:     [k.vi, k.IV, k.I,  k.V ],
+      hebrew:  [k.vi, k.V,  k.IV, k.domMin],
+    };
+    return templates[styleKey] || templates.worship;
   },
 
   // ── Plan de acordes por sección ────────────────────────────────
@@ -123,6 +695,190 @@ const SessionGenerator = {
     // build / challenge / application: cycle
     for (let i = 0; i < bars; i++) out.push(prog[i % prog.length]);
     return out;
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  MODO MELÓDICO — escalas, modos, color y técnica
+  // ════════════════════════════════════════════════════════════════
+  //
+  // No usa acordes×patrón. Genera figuras a partir de la tónica del nivel
+  // (Opción C). Mantiene el mismo esqueleto de 5 secciones para que el
+  // player, la notación y el progreso funcionen igual.
+
+  // Intervalos (semitonos desde la raíz) de cada escala.
+  _scaleIntervals: {
+    ionian:   [0, 2, 4, 5, 7, 9, 11],
+    majpenta: [0, 2, 4, 7, 9],
+    blues:    [0, 3, 5, 6, 7, 10],
+    aeolian:  [0, 2, 3, 5, 7, 8, 10],
+  },
+
+  // Tónica MIDI (mayor) por letra del nivel.
+  _tonicMidiFor(letter) {
+    const map = { C: 60, G: 67, D: 62 };
+    return map[letter] != null ? map[letter] : 60;
+  },
+
+  // Raíz MIDI del relativo menor por etiqueta del nivel.
+  _relMidiFor(rel) {
+    const map = { Am: 57, Em: 64, Bm: 59 };
+    return map[rel] != null ? map[rel] : 57;
+  },
+
+  // Nota MIDI para un grado (puede ser >= longitud → sube de octava).
+  _scaleNote(root, intervals, degree) {
+    const n   = intervals.length;
+    const oct = Math.floor(degree / n);
+    const idx = ((degree % n) + n) % n;
+    return root + 12 * oct + intervals[idx];
+  },
+
+  _generateMelodic(config, mode, tech, style, diff) {
+    const baseBpm  = Math.round(style.bpm * diff.bpmFactor);
+    const finalBpm = clamp(parseInt(config.bpm, 10) || baseBpm, 40, 200);
+
+    const tonicMidi = this._tonicMidiFor(diff.tonic);
+    const relMidi   = this._relMidiFor(diff.rel);
+    const sections  = PracticeLibrary.sections;
+    const measures  = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    sections.forEach(section => {
+      const startBar = mi;
+      for (let b = 0; b < section.bars; b++) {
+        const built = this._melodicMeasure(
+          config, section.key, b, mi, tonicMidi, relMidi
+        );
+        measures.push({
+          index: mi,
+          sectionKey:   section.key,
+          sectionLabel: section.label,
+          chord: built.label,
+          treble: built.treble,
+          bass:   built.bass,
+        });
+        mi++;
+      }
+      sectionMeta.push({
+        key: section.key, label: section.label,
+        startBar, endBar: mi - 1,
+        note: section.note, simplified: !!section.simplified,
+      });
+    });
+
+    const keyLabel = `${diff.tonic} ${diff.mode === 'major' ? 'mayor' : 'menor'} / ${diff.rel}`;
+
+    return {
+      title:    `${mode.label} · ${tech.label}`,
+      subtitle: `${style.label} · ${keyLabel} · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      origBpm:  finalBpm,
+      fifths:   diff.sharps || 0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        style: style.label, styleKey: config.style,
+        pattern: tech.label, patternKey: 'melodic',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: diff.sharps || 0,
+        bpm: finalBpm, pending: false,
+      },
+    };
+  },
+
+  // Devuelve { treble, bass, label } para un compás melódico.
+  _melodicMeasure(config, sectionKey, barInSection, globalIdx, tonicMidi, relMidi) {
+    const techKey = config.technique;
+    const ION = this._scaleIntervals.ionian;
+
+    // Helper: run de 8 corcheas a partir de grados consecutivos.
+    const run8 = (root, intervals, startDeg, ascending) => {
+      const treble = [], bass = [];
+      for (let i = 0; i < 8; i++) {
+        const deg  = ascending ? startDeg + i : startDeg + (7 - i);
+        const midi = this._scaleNote(root, intervals, deg);
+        treble.push({ midi,        beat: i * 0.5, duration: 0.5 });
+        bass.push({   midi: midi - 12, beat: i * 0.5, duration: 0.5 });
+      }
+      return { treble, bass };
+    };
+
+    const asc = (barInSection % 2 === 0);
+
+    if (techKey === 'majorscale') {
+      const r = run8(tonicMidi, ION, 0, asc);
+      return { treble: r.treble, bass: r.bass, label: 'Escala mayor' };
+    }
+
+    if (techKey === 'minorscale') {
+      const r = run8(relMidi, this._scaleIntervals.aeolian, 0, asc);
+      return { treble: r.treble, bass: r.bass, label: 'Escala menor' };
+    }
+
+    if (techKey === 'modes') {
+      // Modos diatónicos del nivel: misma escala, distinta nota de inicio.
+      // Solo usa notas de la armadura → cifrado limpio, sin alteraciones.
+      const plan = {
+        prep:        { deg: 0, name: 'Jónico'      },
+        build:       { deg: 1, name: 'Dórico'      },
+        challenge:   { deg: 2, name: 'Frigio'      },
+        application: { deg: 4, name: 'Mixolidio'   },
+        close:       { deg: 5, name: 'Eólico'      },
+      };
+      const p = plan[sectionKey] || plan.prep;
+      const r = run8(tonicMidi, ION, p.deg, asc);
+      return { treble: r.treble, bass: r.bass, label: p.name };
+    }
+
+    if (techKey === 'pentablues') {
+      const useBlues = (sectionKey === 'challenge' || sectionKey === 'application');
+      const intervals = useBlues ? this._scaleIntervals.blues : this._scaleIntervals.majpenta;
+      const root = useBlues ? relMidi : tonicMidi;
+      const r = run8(root, intervals, 0, asc);
+      return { treble: r.treble, bass: r.bass, label: useBlues ? 'Blues' : 'Pentatónica' };
+    }
+
+    if (techKey === 'hanon') {
+      // Figura Hanon Nº1: por cada grado de partida, patrón de 8 notas.
+      const start = barInSection % 7;
+      const fig = [start, start + 2, start + 1, start + 3,
+                   start + 2, start + 4, start + 3, start + 5];
+      const treble = [], bass = [];
+      fig.forEach((deg, i) => {
+        const midi = this._scaleNote(tonicMidi, ION, deg);
+        treble.push({ midi,        beat: i * 0.5, duration: 0.5 });
+        bass.push({   midi: midi - 12, beat: i * 0.5, duration: 0.5 });
+      });
+      return { treble, bass, label: 'Hanon' };
+    }
+
+    if (techKey === 'phrases') {
+      // Frase melódica corta sobre el bajo del acorde diatónico.
+      const prog = this._progressionFor(config.style, config.difficulty);
+      const chordLabel = prog[globalIdx % prog.length];
+      const chord = ChordLibrary.get(chordLabel);
+      const motifs = [
+        [{ d: 0, dur: 1 }, { d: 1, dur: 0.5 }, { d: 2, dur: 0.5 }, { d: 4, dur: 1 }, { d: 2, dur: 1 }],
+        [{ d: 4, dur: 1 }, { d: 3, dur: 0.5 }, { d: 2, dur: 0.5 }, { d: 1, dur: 1 }, { d: 0, dur: 1 }],
+        [{ d: 2, dur: 0.5 }, { d: 4, dur: 0.5 }, { d: 7, dur: 1 }, { d: 6, dur: 1 }, { d: 4, dur: 1 }],
+      ];
+      const motif = motifs[globalIdx % motifs.length];
+      const treble = [];
+      let beat = 0;
+      motif.forEach(s => {
+        treble.push({ midi: this._scaleNote(tonicMidi, ION, s.d), beat, duration: s.dur });
+        beat += s.dur;
+      });
+      const bass = chord ? [{ midi: chord.rootBass, beat: 0, duration: 4 }] : [];
+      return { treble, bass, label: chordLabel };
+    }
+
+    // Fallback defensivo: escala mayor.
+    const r = run8(tonicMidi, ION, 0, asc);
+    return { treble: r.treble, bass: r.bass, label: 'Escala' };
   },
 
   // ── Compás: aplicar el patrón a un acorde concreto ─────────────
@@ -170,12 +926,19 @@ const SessionGenerator = {
   },
 
   // Resuelve una receta de slot a 1+ números MIDI usando el acorde.
+  // `recipe` puede ser un array de recetas (se aplanan).
   _resolveRecipe(recipe, chord) {
     if (recipe == null || recipe === 'rest') return [];
-    if (recipe === 'root')    return [chord.rootBass];
-    if (recipe === 'fifth')   return [chord.altBass];
-    if (recipe === 'root+12') return [chord.rootBass + 12];
-    if (recipe === 'triad')   return [...chord.rhTriad];
+    if (Array.isArray(recipe)) {
+      return recipe.flatMap(r => this._resolveRecipe(r, chord));
+    }
+    if (recipe === 'root')     return [chord.rootBass];
+    if (recipe === 'fifth')    return [chord.altBass];
+    if (recipe === 'root+12')  return [chord.rootBass + 12];
+    if (recipe === 'fifth+12') return [chord.altBass + 12];
+    if (recipe === 'triad')    return [...chord.rhTriad];
+    if (recipe === 'triad^')   return this._invert(chord.rhTriad, 1);
+    if (recipe === 'triad^^')  return this._invert(chord.rhTriad, 2);
     const m = /^t(\d+)$/.exec(recipe);
     if (m) {
       const i = parseInt(m[1], 10);
@@ -185,6 +948,14 @@ const SessionGenerator = {
       return [t[safe]];
     }
     return [];
+  },
+
+  // Inversión: sube una octava las `n` notas más graves del voicing y
+  // reordena. Funciona para tríadas de 3 o 4 notas.
+  _invert(triad, n) {
+    const arr = (triad || []).slice().sort((a, b) => a - b);
+    for (let i = 0; i < n && i < arr.length; i++) arr[i] += 12;
+    return arr.sort((a, b) => a - b);
   },
 
 };
@@ -206,7 +977,7 @@ function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 // - Cada compás lleva una <direction><words> con el nombre del acorde
 //   arriba del pentagrama (Verovio lo dibuja con su tipografía).
 
-const DIVISIONS = 4;              // divisiones por negra
+const DIVISIONS = 12;             // divisiones por negra (12 = admite binario y tresillos)
 const BEATS_PER_MEASURE = 4;
 const MEASURE_DIVS = DIVISIONS * BEATS_PER_MEASURE;
 const STEP_NAMES = ['C','C','D','D','E','F','F','G','G','A','A','B'];
@@ -215,6 +986,7 @@ const STEP_ALTER = [ 0,  1,  0,  1,  0, 0,  1,  0,  1, 0,  1, 0];
 SessionGenerator.toMusicXML = function (session) {
   const measures = session.measures;
   const bpm = session.origBpm || 90;
+  const fifths = session.fifths || 0;
 
   let xml = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
   xml += '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n';
@@ -232,7 +1004,7 @@ SessionGenerator.toMusicXML = function (session) {
     if (i === 0) {
       xml += '      <attributes>\n';
       xml += `        <divisions>${DIVISIONS}</divisions>\n`;
-      xml += '        <key><fifths>0</fifths></key>\n';
+      xml += `        <key><fifths>${fifths}</fifths></key>\n`;
       xml += '        <time><beats>4</beats><beat-type>4</beat-type></time>\n';
       xml += '        <staves>2</staves>\n';
       xml += '        <clef number="1"><sign>G</sign><line>2</line></clef>\n';
@@ -241,8 +1013,16 @@ SessionGenerator.toMusicXML = function (session) {
       xml += `      <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type><sound tempo="${bpm}"/></direction>\n`;
     }
 
-    // Etiqueta de acorde como <words> encima del pentagrama
-    if (m.chord) {
+    // Etiquetas de acorde como <words> encima del pentagrama. Si el compás
+    // trae varios acordes (chordSegs), cada nombre se alinea con su pulso
+    // mediante <offset>; si no, se usa el string único m.chord en el pulso 1.
+    if (m.chordSegs && m.chordSegs.length) {
+      m.chordSegs.forEach(seg => {
+        const offDivs = Math.round((seg.beat || 0) * DIVISIONS);
+        const offset  = offDivs > 0 ? `<offset>${offDivs}</offset>` : '';
+        xml += `      <direction placement="above"><direction-type><words font-weight="bold">${escapeXml(seg.label)}</words></direction-type>${offset}</direction>\n`;
+      });
+    } else if (m.chord) {
       xml += `      <direction placement="above"><direction-type><words font-weight="bold">${escapeXml(m.chord)}</words></direction-type></direction>\n`;
     }
 
@@ -318,7 +1098,9 @@ function emitStaff(notes, voice, staff) {
 // dentro del MISMO pulso. Silencios, negras+ y cambios de pulso cortan la
 // barra. Una nota beameable suelta no lleva barra (queda con bandera).
 function assignBeams(slots) {
-  const isBeamable = s => s.type === 'note' && s.durDivs >= 1 && s.durDivs <= 3;
+  // Beameables (DIVISIONS=12): corchea=6, semicorchea=3, corchea-tresillo=4,
+  // semi-tresillo=2. NO la negra (12) ni la negra-tresillo (8).
+  const isBeamable = s => s.type === 'note' && s.durDivs >= 2 && s.durDivs <= 6;
   const beatOf     = s => Math.floor(s.startDiv / DIVISIONS);
   let i = 0;
   while (i < slots.length) {
@@ -343,7 +1125,7 @@ function emitNote(midi, durDivs, voice, staff, isChordNote, beam) {
   const step = STEP_NAMES[pc];
   const alter = STEP_ALTER[pc];
   const oct = Math.floor(midi / 12) - 1;
-  const type = durToType(durDivs);
+  const spec = durToSpec(durDivs);
   let s = '      <note>\n';
   if (isChordNote) s += '        <chord/>\n';
   s += `        <pitch><step>${step}</step>`;
@@ -351,7 +1133,8 @@ function emitNote(midi, durDivs, voice, staff, isChordNote, beam) {
   s += `<octave>${oct}</octave></pitch>\n`;
   s += `        <duration>${durDivs}</duration>\n`;
   s += `        <voice>${voice}</voice>\n`;
-  if (type) s += `        <type>${type}</type>\n`;
+  if (spec.type) s += `        <type>${spec.type}</type>\n`;
+  if (spec.triplet) s += '        <time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>\n';
   s += `        <staff>${staff}</staff>\n`;
   if (beam) s += `        <beam number="1">${beam}</beam>\n`;
   s += '      </note>\n';
@@ -359,29 +1142,35 @@ function emitNote(midi, durDivs, voice, staff, isChordNote, beam) {
 }
 
 function emitRest(durDivs, voice, staff) {
-  const type = durToType(durDivs);
+  const spec = durToSpec(durDivs);
   let s = '      <note>\n';
   s += '        <rest/>\n';
   s += `        <duration>${durDivs}</duration>\n`;
   s += `        <voice>${voice}</voice>\n`;
-  if (type) s += `        <type>${type}</type>\n`;
+  if (spec.type) s += `        <type>${spec.type}</type>\n`;
+  if (spec.triplet) s += '        <time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>\n';
   s += `        <staff>${staff}</staff>\n`;
   s += '      </note>\n';
   return s;
 }
 
-function durToType(divs) {
-  // Para DIVISIONS=4: 1=16th, 2=eighth, 4=quarter, 8=half, 16=whole
+// Para DIVISIONS=12. Binario: 3=16th, 6=eighth, 12=quarter, 24=half, 48=whole.
+// Tresillos (× 2/3 del binario): 2=16th·3, 4=eighth·3, 8=quarter·3, 16=half·3.
+function durToSpec(divs) {
   switch (divs) {
-    case 1:  return '16th';
-    case 2:  return 'eighth';
-    case 3:  return 'eighth';   // corchea con puntillo — Verovio interpretará
-    case 4:  return 'quarter';
-    case 6:  return 'quarter';  // negra con puntillo
-    case 8:  return 'half';
-    case 12: return 'half';     // blanca con puntillo
-    case 16: return 'whole';
-    default: return 'quarter';
+    case 2:  return { type: '16th',    triplet: true  };
+    case 3:  return { type: '16th',    triplet: false };
+    case 4:  return { type: 'eighth',  triplet: true  };
+    case 6:  return { type: 'eighth',  triplet: false };
+    case 8:  return { type: 'quarter', triplet: true  };
+    case 9:  return { type: 'eighth',  triplet: false };  // corchea con puntillo (aprox)
+    case 12: return { type: 'quarter', triplet: false };
+    case 16: return { type: 'half',    triplet: true  };
+    case 18: return { type: 'quarter', triplet: false };  // negra con puntillo (aprox)
+    case 24: return { type: 'half',    triplet: false };
+    case 36: return { type: 'half',    triplet: false };  // blanca con puntillo (aprox)
+    case 48: return { type: 'whole',   triplet: false };
+    default: return { type: 'quarter', triplet: false };
   }
 }
 

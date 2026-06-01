@@ -47,11 +47,17 @@ const PianoEngine = {
   },
 
   _adaptToViewport() {
-    // Detección simple: < 760px viewport → teclas pequeñas
-    const isPhone = window.matchMedia('(max-width: 760px)').matches;
+    // < 760px → teléfono (teclas pequeñas)
+    // 760–1180px → tablet (teclas medianas, siempre 88 teclas)
+    // > 1180px → escritorio
+    const isPhone  = window.matchMedia('(max-width: 760px)').matches;
+    const isTablet = window.matchMedia('(min-width: 761px) and (max-width: 1180px)').matches;
     if (isPhone) {
       this.WW = 15; this.WH = 96;
       this.BW = 10; this.BH = 60;
+    } else if (isTablet) {
+      this.WW = 17; this.WH = 112;
+      this.BW = 11; this.BH = 70;
     } else {
       this.WW = 20; this.WH = 130;
       this.BW = 13; this.BH = 82;
@@ -188,6 +194,14 @@ const PianoEngine = {
     const el = this.keyEl(midi);
     if (!el) return;
     el.classList.remove('hl-correct');
+  },
+
+  // Destello rojo breve para una nota incorrecta (modo follow).
+  flashWrong(midi) {
+    const el = this.keyEl(midi);
+    if (!el) return;
+    el.classList.add('hl-wrong');
+    setTimeout(() => { if (el) el.classList.remove('hl-wrong'); }, 320);
   },
 
   // ── Procesamiento de steps ──────────────────────────────────────
