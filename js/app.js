@@ -350,7 +350,6 @@ const App = {
   startPractice(practiceId) {
     const item = PracticeLibrary.byId(practiceId);
     if (!item) { this.toast('Práctica no encontrada', true); return; }
-    this.currentPractice = item;
     this.currentMode = item.mode;   // por si se abrió desde "Seguir practicando"
     Storage.saveLastExercise(item.id);
 
@@ -371,6 +370,10 @@ const App = {
         explain:    item.explain,
         meta:       item.meta,
       });
+      this.currentPractice = {
+        ...item,
+        renderedChords: this._uniqueSessionChords(session),
+      };
       Player.loadSession(session);
       this._refreshCompleteBtn();
       this._refreshFavBtn();
@@ -485,8 +488,142 @@ const App = {
     if (p.bpm)  bits.push(`${p.bpm} BPM`);
     document.getElementById('info-meta').textContent = bits.join(' · ');
 
-    document.getElementById('info-body').textContent = p.explain || 'Sin descripción disponible.';
+    this._renderInfoBody(document.getElementById('info-body'), this._exerciseInfo(p));
     document.getElementById('info-modal').hidden = false;
+  },
+
+  _renderInfoBody(host, blocks) {
+    if (!host) return;
+    host.textContent = '';
+    const items = (blocks && blocks.length)
+      ? blocks
+      : [{ title: 'Qué estás entrenando', body: 'Este ejercicio presenta una habilidad musical concreta para usarla en canciones.' }];
+
+    items.forEach(item => {
+      const block = document.createElement('section');
+      block.className = 'info-block';
+      const title = document.createElement('strong');
+      title.className = 'info-block-title';
+      title.textContent = item.title;
+      const body = document.createElement('p');
+      body.textContent = item.body;
+      block.appendChild(title);
+      block.appendChild(body);
+      host.appendChild(block);
+    });
+  },
+
+  _exerciseInfo(p) {
+    const exerciseChords = p.renderedChords || p.chords;
+    const chords = this._chordList(exerciseChords);
+    const baseExplain = p.explain || 'Practicas una habilidad armónica aplicable a canciones reales.';
+    const isSingleChord = (exerciseChords || []).length === 1;
+
+    if (p.mode === 'accompaniment') {
+      const focus = p.meta && p.meta.useInversions
+        ? 'mantener la base en la mano izquierda mientras la derecha usa acordes cómodos e inversiones'
+        : 'coordinar fundamental en la mano izquierda con acordes completos en la mano derecha';
+      const pedal = p.meta && p.meta.pedal ? ` Pedal: ${p.meta.pedal}.` : '';
+      const useCase = p.meta && p.meta.useCase ? ` ${p.meta.useCase}` : '';
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} El foco es ${focus} con ${chords}.${pedal}${useCase}` },
+        { title: 'Qué debes escuchar', body: 'La mano izquierda debe sentirse como base estable y la derecha debe sostener la armonía sin competir con una melodía imaginaria.' },
+        { title: 'Error común', body: 'Golpear ambas manos sin pulso interno, o dejar que la derecha suene pesada y tape la función del bajo.' },
+        { title: 'Señal de éxito', body: 'Puedes repetir la sección con pulso firme, cambios claros y sensación de acompañar una canción real.' },
+      ];
+    }
+
+    if (p.mode !== 'chords') {
+      return [
+        { title: 'Qué estás entrenando', body: baseExplain },
+        { title: 'Qué debes escuchar', body: 'Busca que el pulso se mantenga estable y que cada cambio tenga intención musical.' },
+        { title: 'Error común', body: 'Tocar las notas correctas sin escuchar si la frase respira como música.' },
+        { title: 'Señal de éxito', body: 'Puedes repetir la sección manteniendo continuidad, sonido parejo y una llegada clara.' },
+      ];
+    }
+
+    if (p.technique === 'triads') {
+      const family = this._triadFamily(exerciseChords);
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Trabaja ${family} en posición fundamental usando ${chords}.` },
+        { title: 'Qué debes escuchar', body: 'Cada acorde debe sonar estable y reconocible; distingue si el color es mayor, menor, tensión o reposo.' },
+        { title: 'Error común', body: 'Memorizar solo la forma visual y perder el nombre o la función del acorde dentro de la progresión.' },
+        { title: 'Señal de éxito', body: 'Puedes anticipar el próximo acorde, tocarlo en el pulso y sentir la progresión como una frase de canción.' },
+      ];
+    }
+
+    if (p.technique === 'inversions') {
+      const focus = p.meta && p.meta.inv
+        ? (p.meta.inv === 1 ? 'la primera inversión' : 'la segunda inversión')
+        : (p.meta && p.meta.useInversions ? 'la inversión más cercana para reducir saltos' : 'fundamental, primera inversión y segunda inversión');
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} El foco es ${focus} con ${chords}.` },
+        { title: 'Qué debes escuchar', body: isSingleChord ? 'El acorde debe conservar su identidad aunque la nota grave cambie.' : 'Los cambios deben sentirse conectados, como si la mano se moviera poco entre acordes.' },
+        { title: 'Error común', body: 'Volver siempre a posición fundamental o elegir una inversión sin propósito musical.' },
+        { title: 'Señal de éxito', body: 'Puedes tocar la progresión manteniendo la mano en una zona reducida y reconocer qué inversión estás usando.' },
+      ];
+    }
+
+    if (p.technique === 'sevenths') {
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Compara y aplica familias de séptima con ${chords}.` },
+        { title: 'Qué debes escuchar', body: 'El Maj7 debe sentirse amplio, el m7 más profundo y el dominante 7 con deseo de resolver.' },
+        { title: 'Error común', body: 'Tratar la séptima como una nota extra cualquiera y no escuchar cómo cambia la emoción del acorde.' },
+        { title: 'Señal de éxito', body: 'Puedes nombrar el tipo de séptima y tocarla sin que la progresión pierda claridad pop, worship o balada.' },
+      ];
+    }
+
+    if (p.technique === 'extensions') {
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Exploras colores modernos como add9, sus2 y sus4 dentro de ${chords}.` },
+        { title: 'Qué debes escuchar', body: 'Las extensiones deben abrir el sonido sin volver confusa la función principal del acorde.' },
+        { title: 'Error común', body: 'Tocar el color como adorno aislado y olvidar si el acorde está reposando, esperando o resolviendo.' },
+        { title: 'Señal de éxito', body: 'Puedes sentir cuándo el color aporta espacio, cuándo crea espera y cuándo conviene resolverlo.' },
+      ];
+    }
+
+    if (p.technique === 'application') {
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Aquí usas ${chords} como una mini canción, no como lista de acordes.` },
+        { title: 'Qué debes escuchar', body: 'La pieza debe tener inicio, movimiento y cierre; cada sección debe sonar conectada con la anterior.' },
+        { title: 'Error común', body: 'Tocar todos los compases con la misma intención, sin preparar la llegada ni respirar al final.' },
+        { title: 'Señal de éxito', body: 'Puedes repetirla de memoria corta sintiendo una forma musical clara y una resolución convincente.' },
+      ];
+    }
+
+    return [
+      { title: 'Qué estás entrenando', body: baseExplain },
+      { title: 'Qué debes escuchar', body: 'Escucha la función de cada acorde dentro de la progresión.' },
+      { title: 'Error común', body: 'Tocar cambios correctos sin una intención musical clara.' },
+      { title: 'Señal de éxito', body: 'La progresión se siente útil dentro de una canción real.' },
+    ];
+  },
+
+  _chordList(chords) {
+    const list = (chords || []).filter(Boolean);
+    if (!list.length) return 'la progresión del ejercicio';
+    if (list.length === 1) return `el acorde ${list[0]}`;
+    return `los acordes ${list.join(' - ')}`;
+  },
+
+  _triadFamily(chords) {
+    const list = chords || [];
+    const hasMinor = list.some(ch => /m$/.test(ch));
+    const hasMajor = list.some(ch => /^[A-G]#?$/.test(ch));
+    if (hasMajor && hasMinor) return 'triadas mayores y menores';
+    if (hasMinor) return 'triadas menores';
+    return 'triadas mayores';
+  },
+
+  _uniqueSessionChords(session) {
+    const out = [];
+    (session && session.measures || []).forEach(measure => {
+      const segs = measure.chordSegs || [];
+      segs.forEach(seg => {
+        if (seg && seg.label && !out.includes(seg.label)) out.push(seg.label);
+      });
+    });
+    return out;
   },
 
   closeInfo() {

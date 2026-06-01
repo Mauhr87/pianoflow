@@ -65,6 +65,13 @@ const SessionGenerator = {
       return this._generateBlockChords(config, mode, tech, style, diff);
     }
 
+    // ── Currículum fiel: ACOMPAÑAMIENTO ────────────────────────────
+    // Rutas propias por técnica para controlar mano izquierda, patrón,
+    // compás ternario, pedal y aplicación musical.
+    if (config.mode === 'accompaniment') {
+      return this._generateAccompaniment(config, mode, tech, style, diff);
+    }
+
     const patternKey = config.pattern || (tech && tech.pattern) || 'bloque';
     const pattern    = PatternLibrary.get(patternKey);
     if (!pattern) {
@@ -170,22 +177,7 @@ const SessionGenerator = {
 
     const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
 
-    // Reparto de compases por etapa (Cierre siempre 1; resto por ratio).
-    const close = 1;
-    const rem   = total - close;
-    let prep  = Math.max(1, Math.round(rem * 0.21));
-    let build = Math.max(1, Math.round(rem * 0.32));
-    let chal  = Math.max(1, Math.round(rem * 0.32));
-    let app   = rem - (prep + build + chal);
-    while (app < 1) { if (build > 1) build--; else if (chal > 1) chal--; else if (prep > 1) prep--; else break; app = rem - (prep + build + chal); }
-
-    const plan = [
-      { key: 'prep',        label: 'Preparación',  bars: prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
-      { key: 'build',       label: 'Construcción', bars: build, build: (i)    => this._triBarsBuild(prog, i) },
-      { key: 'challenge',   label: 'Desafío',      bars: chal,  build: (i)    => this._triBarsChallenge(prog, i, fast) },
-      { key: 'application', label: 'Aplicación',   bars: app,   build: (i, n) => this._triBarsApply(prog, i, n) },
-      { key: 'close',       label: 'Cierre',       bars: close, build: (i, n) => this._triBarsClose(prog, i, n) },
-    ];
+    const plan = this._chordStagePlan(total, prog, fast);
 
     const measures = [];
     const sectionMeta = [];
@@ -235,6 +227,57 @@ const SessionGenerator = {
     };
   },
 
+  // Distribución pedagógica de secciones:
+  //   8c  → 1 / 2 / 2 / 2 / 1
+  //   12c → 2 / 3 / 3 / 3 / 1
+  //   16c → 2 / 4 / 4 / 5 / 1
+  //   20c → 3 / 5 / 5 / 6 / 1
+  //
+  // Desafío es la sección más exigente; Aplicación no compite en dificultad,
+  // sino que necesita suficiente espacio para sonar como una frase de canción.
+  _sectionBarsFor(total) {
+    const t = Math.max(5, parseInt(total, 10) || 8);
+    if (t <= 8)  return this._fitSectionBars(t, [1, 2, 2, 2, 1]);
+    if (t <= 12) return this._fitSectionBars(t, [2, 3, 3, 3, 1]);
+    if (t <= 16) return this._fitSectionBars(t, [2, 4, 4, 5, 1]);
+    if (t <= 20) return this._fitSectionBars(t, [3, 5, 5, 6, 1]);
+
+    const close = 1;
+    const prep = Math.max(3, Math.round(t * 0.13));
+    const build = Math.max(4, Math.round(t * 0.25));
+    const chal = Math.max(4, Math.round(t * 0.25));
+    const app = Math.max(chal, t - close - prep - build - chal);
+    return this._fitSectionBars(t, [prep, build, chal, app, close]);
+  },
+
+  _fitSectionBars(total, target) {
+    const bars = target.slice();
+    const sum = () => bars.reduce((a, b) => a + b, 0);
+    const reduceOrder = [3, 1, 2, 0]; // Aplicación, Construcción, Desafío, Preparación
+    let guard = 80;
+    while (sum() > total && guard--) {
+      const idx = reduceOrder.find(i => bars[i] > 1);
+      if (idx == null) break;
+      bars[idx]--;
+    }
+    guard = 80;
+    while (sum() < total && guard--) {
+      bars[3]++; // el espacio extra ayuda a que Aplicación respire
+    }
+    return { prep: bars[0], build: bars[1], chal: bars[2], app: bars[3], close: bars[4] };
+  },
+
+  _chordStagePlan(total, prog, fast) {
+    const bars = this._sectionBarsFor(total);
+    return [
+      { key: 'prep',        label: 'Preparación',  bars: bars.prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
+      { key: 'build',       label: 'Construcción', bars: bars.build, build: (i)    => this._triBarsBuild(prog, i) },
+      { key: 'challenge',   label: 'Desafío',      bars: bars.chal,  build: (i, n) => this._triBarsChallenge(prog, i, n, fast) },
+      { key: 'application', label: 'Aplicación',   bars: bars.app,   build: (i, n) => this._triBarsApply(prog, i, n) },
+      { key: 'close',       label: 'Cierre',       bars: bars.close, build: (i, n) => this._triBarsClose(prog, i, n) },
+    ];
+  },
+
   // Etapas (devuelven segmentos [{ label, beat, dur }] que suman 4 pulsos):
 
   // Preparación: 1-2 acordes, una redonda por compás (mínima carga).
@@ -254,8 +297,8 @@ const SessionGenerator = {
 
   // Desafío: progresión completa. Cambios más frecuentes (dos acordes por
   // compás) en los ejercicios marcados fastChanges; si no, bloques 1 y 3.
-  _triBarsChallenge(prog, i, fast) {
-    if (fast) {
+  _triBarsChallenge(prog, i, n, fast) {
+    if (fast || prog.length > n) {
       const a = prog[(2 * i) % prog.length];
       const b = prog[(2 * i + 1) % prog.length];
       return [{ label: a, beat: 0, dur: 2 }, { label: b, beat: 2, dur: 2 }];
@@ -266,9 +309,21 @@ const SessionGenerator = {
 
   // Aplicación: frase con la progresión; último compás se sostiene (lírico).
   _triBarsApply(prog, i, n) {
-    const label = prog[i % prog.length];
+    const phrase = this._applicationPhrase(prog, n);
+    const label = phrase[i % phrase.length];
     if (i === n - 1) return [{ label, beat: 0, dur: 4 }];
     return [{ label, beat: 0, dur: 2 }, { label, beat: 2, dur: 2 }];
+  },
+
+  _applicationPhrase(prog, bars) {
+    if (!prog.length) return ['C'];
+    if (bars >= 4 && prog.length > 4) {
+      const tail = prog.slice(-4);
+      const phrase = tail.slice();
+      while (phrase.length < bars) phrase.push(prog[0]);
+      return phrase;
+    }
+    return prog;
   },
 
   // Cierre: resolución a la tónica (primer acorde) como redonda.
@@ -330,21 +385,7 @@ const SessionGenerator = {
 
     const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
 
-    const close = 1;
-    const rem   = total - close;
-    let prep  = Math.max(1, Math.round(rem * 0.21));
-    let build = Math.max(1, Math.round(rem * 0.32));
-    let chal  = Math.max(1, Math.round(rem * 0.32));
-    let app   = rem - (prep + build + chal);
-    while (app < 1) { if (build > 1) build--; else if (chal > 1) chal--; else if (prep > 1) prep--; else break; app = rem - (prep + build + chal); }
-
-    const plan = [
-      { key: 'prep',        label: 'Preparación',  bars: prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
-      { key: 'build',       label: 'Construcción', bars: build, build: (i)    => this._triBarsBuild(prog, i) },
-      { key: 'challenge',   label: 'Desafío',      bars: chal,  build: (i)    => this._triBarsChallenge(prog, i, fast) },
-      { key: 'application', label: 'Aplicación',   bars: app,   build: (i, n) => this._triBarsApply(prog, i, n) },
-      { key: 'close',       label: 'Cierre',       bars: close, build: (i, n) => this._triBarsClose(prog, i, n) },
-    ];
+    const plan = this._chordStagePlan(total, prog, fast);
 
     // Selector de voicing con estado (recorre los segmentos en orden).
     let prevMean = null;
@@ -505,21 +546,7 @@ const SessionGenerator = {
 
     const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
 
-    const close = 1;
-    const rem   = total - close;
-    let prep  = Math.max(1, Math.round(rem * 0.21));
-    let build = Math.max(1, Math.round(rem * 0.32));
-    let chal  = Math.max(1, Math.round(rem * 0.32));
-    let app   = rem - (prep + build + chal);
-    while (app < 1) { if (build > 1) build--; else if (chal > 1) chal--; else if (prep > 1) prep--; else break; app = rem - (prep + build + chal); }
-
-    const plan = [
-      { key: 'prep',        label: 'Preparación',  bars: prep,  build: (i, n) => this._triBarsPrep(prog, i, n) },
-      { key: 'build',       label: 'Construcción', bars: build, build: (i)    => this._triBarsBuild(prog, i) },
-      { key: 'challenge',   label: 'Desafío',      bars: chal,  build: (i)    => this._triBarsChallenge(prog, i, fast) },
-      { key: 'application', label: 'Aplicación',   bars: app,   build: (i, n) => this._triBarsApply(prog, i, n) },
-      { key: 'close',       label: 'Cierre',       bars: close, build: (i, n) => this._triBarsClose(prog, i, n) },
-    ];
+    const plan = this._chordStagePlan(total, prog, fast);
 
     let prevMean = null;
     const chooseVoicing = (label) => {
@@ -643,6 +670,258 @@ const SessionGenerator = {
       if (d < bd) { bd = d; best = { inv, v }; }
     }
     return best;
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  ACOMPAÑAMIENTO — BLOQUE
+  // ════════════════════════════════════════════════════════════════
+  //
+  // No usa octavas, quinta alternada, bajo alternado, arpegios ni vals.
+  // LH = fundamental simple sostenida; RH = acorde completo en bloque.
+  // La dificultad crece por vocabulario armónico e inversiones, no por ritmo.
+
+  _generateAccompanimentBlock(config, mode, tech, style, diff) {
+    return this._generateAccompaniment(config, mode, tech, style, diff);
+  },
+
+  _generateAccompaniment(config, mode, tech, style, diff) {
+    const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const useInv = !!(config.meta && config.meta.useInversions);
+    const holdChanges = !!(config.meta && config.meta.holdChanges);
+    const groove = (config.meta && config.meta.groove) || 'block';
+    const meter = (config.meta && config.meta.meter) || '4/4';
+    const measureBeats = this._measureBeatsForMeter(meter);
+
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const plan = this._chordStagePlan(total, prog, false);
+
+    let prevMean = null;
+    const chooseVoicing = (label) => {
+      const p = this._parseChord(label);
+      if (!p) return null;
+      const root = 36 + p.rootPc;
+      const rh = useInv && prevMean !== null
+        ? this._closestChordVoicing(label, prevMean).v
+        : this._chordVoicing(label, 0);
+      prevMean = this._voicingMean(rh);
+      return { rh, root };
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = this._accompanimentSegments(prog, stage, b, mi, measureBeats, holdChanges);
+        const { treble, bass } = this._accompanimentMeasure(segments, chooseVoicing, {
+          technique: config.technique,
+          groove,
+          stageKey: stage.key,
+          measureBeats,
+          useFifth: !!(config.meta && config.meta.useFifth),
+        });
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble,
+          bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  meter,
+      measureBeats,
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: 'Bloque', patternKey: 'bloque',
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        pedal: (config.meta && config.meta.pedal) || '',
+        useCase: (config.meta && config.meta.useCase) || '',
+      },
+    };
+  },
+
+  _measureBeatsForMeter(meter) {
+    if (meter === '3/4') return 3;
+    if (meter === '6/8') return 3; // 6 corcheas = 3 negras en nuestro modelo temporal
+    return 4;
+  },
+
+  _heldChordSegments(prog, measureIndex) {
+    const label = prog[Math.floor(measureIndex / 2) % prog.length];
+    return [{ label, beat: 0, dur: 4 }];
+  },
+
+  _accompanimentSegments(prog, stage, barInStage, globalMeasure, measureBeats, holdChanges) {
+    if (stage.key === 'close') return [{ label: prog[0], beat: 0, dur: measureBeats }];
+    if (holdChanges && stage.key !== 'challenge') {
+      const label = prog[Math.floor(globalMeasure / 2) % prog.length];
+      return [{ label, beat: 0, dur: measureBeats }];
+    }
+    if (stage.key === 'prep') {
+      const label = prog[barInStage % Math.min(2, prog.length)];
+      return [{ label, beat: 0, dur: measureBeats }];
+    }
+    if (stage.key === 'build') {
+      const subset = prog.slice(0, Math.min(4, prog.length));
+      return [{ label: subset[barInStage % subset.length], beat: 0, dur: measureBeats }];
+    }
+    if (stage.key === 'challenge' && prog.length > stage.bars) {
+      const half = measureBeats / 2;
+      return [
+        { label: prog[(barInStage * 2) % prog.length], beat: 0, dur: half },
+        { label: prog[(barInStage * 2 + 1) % prog.length], beat: half, dur: half },
+      ];
+    }
+    if (stage.key === 'application') {
+      const phrase = this._applicationPhrase(prog, stage.bars);
+      return [{ label: phrase[barInStage % phrase.length], beat: 0, dur: measureBeats }];
+    }
+    return [{ label: prog[barInStage % prog.length], beat: 0, dur: measureBeats }];
+  },
+
+  _accompanimentMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach(s => {
+      const v = chooseVoicing(s.label);
+      if (!v) return;
+      const groove = this._grooveFor(opts, s);
+      groove.bass.forEach(ev => {
+        this._bassRecipe(ev.kind, v.root).forEach(midi => {
+          bass.push({ midi, beat: s.beat + ev.beat, duration: ev.dur });
+        });
+      });
+      groove.rh.forEach(ev => {
+        v.rh.forEach(midi => treble.push({ midi, beat: s.beat + ev.beat, duration: ev.dur }));
+      });
+    });
+    return { treble, bass };
+  },
+
+  _grooveFor(opts, segment) {
+    const dur = segment.dur;
+    const mb = opts.measureBeats;
+    const g = opts.groove || 'block';
+    const stage = opts.stageKey || '';
+    const useFifth = !!opts.useFifth;
+
+    const whole = () => ({
+      bass: [{ kind: 'root', beat: 0, dur }],
+      rh: [{ beat: 0, dur }],
+    });
+    const blockPulse = () => ({
+      bass: [{ kind: 'root', beat: 0, dur }],
+      rh: dur >= 4
+        ? [{ beat: 0, dur: 2 }, { beat: 2, dur: dur - 2 }]
+        : [{ beat: 0, dur }],
+    });
+    const waltz = () => ({
+      bass: [
+        { kind: 'root', beat: 0, dur: Math.min(1, dur) },
+        ...(useFifth && dur >= 3 ? [{ kind: 'fifth', beat: 2, dur: 1 }] : []),
+      ],
+      rh: dur >= 3
+        ? [{ beat: 1, dur: 1 }, { beat: 2, dur: 1 }]
+        : [{ beat: dur / 2, dur: dur / 2 }],
+    });
+    const sixEight = () => ({
+      bass: [
+        { kind: 'root', beat: 0, dur: 0.5 },
+        ...(useFifth || dur >= 3 ? [{ kind: 'fifth', beat: 1.5, dur: 0.5 }] : []),
+      ].filter(ev => ev.beat < dur),
+      rh: [0.5, 1, 2, 2.5].filter(b => b < dur).map(b => ({ beat: b, dur: Math.min(0.5, dur - b) })),
+    });
+    const softPulse = () => ({
+      bass: [{ kind: 'root', beat: 0, dur }],
+      rh: dur >= 4
+        ? [{ beat: 0, dur: 1.5 }, { beat: 2, dur: 2 }]
+        : [{ beat: 0, dur }],
+    });
+    const popPulse = () => ({
+      bass: [{ kind: 'root', beat: 0, dur }],
+      rh: [0, 1.5, 2.5].filter(b => b < dur).map(b => ({ beat: b, dur: Math.min(1, dur - b) })),
+    });
+    const dynamic = () => stage === 'challenge' || stage === 'application' ? popPulse() : softPulse();
+    const octaves = () => ({
+      bass: dur >= 4
+        ? [{ kind: 'octave', beat: 0, dur: 2 }, { kind: 'octave', beat: 2, dur: 2 }]
+        : [{ kind: 'octave', beat: 0, dur }],
+      rh: [{ beat: 0, dur }],
+    });
+    const fifths = () => ({
+      bass: dur >= 4
+        ? [{ kind: 'root', beat: 0, dur: 2 }, { kind: 'fifth', beat: 2, dur: 2 }]
+        : [{ kind: 'root', beat: 0, dur }],
+      rh: dur >= 4 ? [{ beat: 0, dur: 2 }, { beat: 2, dur: 2 }] : [{ beat: 0, dur }],
+    });
+    const alternatingBass = () => ({
+      bass: [0, 1, 2, 3].filter(b => b < dur).map((b, i) => ({
+        kind: i % 2 === 0 ? (i === 2 ? 'rootHigh' : 'root') : 'fifth',
+        beat: b,
+        dur: Math.min(1, dur - b),
+      })),
+      rh: dur >= 4 ? [{ beat: 0, dur: 2 }, { beat: 2, dur: 2 }] : [{ beat: 0, dur }],
+    });
+    const mixedLeft = () => {
+      if (stage === 'challenge') return alternatingBass();
+      if (stage === 'application') return fifths();
+      return octaves();
+    };
+    const mixedTernary = () => (mb === 3 && (stage === 'challenge' || g === 'sixEight')) ? sixEight() : waltz();
+    const mixedBallad = () => (stage === 'prep' || stage === 'close') ? whole() : dynamic();
+    const moduleFinal = () => {
+      if (stage === 'challenge') return alternatingBass();
+      if (stage === 'application') return mixedBallad();
+      return blockPulse();
+    };
+
+    if (g === 'waltz') return waltz();
+    if (g === 'sixEight') return sixEight();
+    if (g === 'mixedTernary') return mixedTernary();
+    if (g === 'space' || g === 'sustain' || g === 'pad' || g === 'cinematic') return whole();
+    if (g === 'softPulse') return softPulse();
+    if (g === 'popPulse' || g === 'gentleVariation') return popPulse();
+    if (g === 'dynamic') return dynamic();
+    if (g === 'mixedBallad') return mixedBallad();
+    if (g === 'octaves') return octaves();
+    if (g === 'fifths') return fifths();
+    if (g === 'alternatingBass') return alternatingBass();
+    if (g === 'mixedLeft') return mixedLeft();
+    if (g === 'moduleFinal') return moduleFinal();
+    if (g === 'blockPulse') return blockPulse();
+    return blockPulse();
+  },
+
+  _bassRecipe(kind, root) {
+    if (kind === 'fifth') return [root + 7];
+    if (kind === 'rootHigh') return [root + 12];
+    if (kind === 'octave') return [root, root + 12];
+    return [root];
   },
 
   // ── Progresión por estilo, derivada de la tonalidad del nivel ──────
@@ -987,6 +1266,10 @@ SessionGenerator.toMusicXML = function (session) {
   const measures = session.measures;
   const bpm = session.origBpm || 90;
   const fifths = session.fifths || 0;
+  const sig = String(session.timeSig || '4/4').split('/');
+  const beats = parseInt(sig[0], 10) || 4;
+  const beatType = parseInt(sig[1], 10) || 4;
+  const measureDivs = Math.round(beats * DIVISIONS * (4 / beatType));
 
   let xml = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
   xml += '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n';
@@ -1005,7 +1288,7 @@ SessionGenerator.toMusicXML = function (session) {
       xml += '      <attributes>\n';
       xml += `        <divisions>${DIVISIONS}</divisions>\n`;
       xml += `        <key><fifths>${fifths}</fifths></key>\n`;
-      xml += '        <time><beats>4</beats><beat-type>4</beat-type></time>\n';
+      xml += `        <time><beats>${beats}</beats><beat-type>${beatType}</beat-type></time>\n`;
       xml += '        <staves>2</staves>\n';
       xml += '        <clef number="1"><sign>G</sign><line>2</line></clef>\n';
       xml += '        <clef number="2"><sign>F</sign><line>4</line></clef>\n';
@@ -1027,13 +1310,13 @@ SessionGenerator.toMusicXML = function (session) {
     }
 
     // Voz 1 / staff 1 (treble - mano derecha)
-    xml += emitStaff(m.treble, 1, 1);
+    xml += emitStaff(m.treble, 1, 1, measureDivs);
 
     // Backup al inicio del compás para escribir el bajo
-    xml += `      <backup><duration>${MEASURE_DIVS}</duration></backup>\n`;
+    xml += `      <backup><duration>${measureDivs}</duration></backup>\n`;
 
     // Voz 5 / staff 2 (bass - mano izquierda)
-    xml += emitStaff(m.bass, 5, 2);
+    xml += emitStaff(m.bass, 5, 2, measureDivs);
 
     xml += '    </measure>\n';
   });
@@ -1046,7 +1329,7 @@ SessionGenerator.toMusicXML = function (session) {
 // Serializa las notas de UN pentagrama agrupando ataques simultáneos
 // como acordes, rellenando los huecos con silencios y agrupando corcheas
 // con barra (beaming) por pulso.
-function emitStaff(notes, voice, staff) {
+function emitStaff(notes, voice, staff, measureDivs) {
   // 1) Agrupar ataques simultáneos por beat
   const groups = new Map();
   (notes || []).forEach(n => {
@@ -1070,8 +1353,8 @@ function emitStaff(notes, voice, staff) {
     slots.push({ type: 'note', startDiv: cursor, durDivs, notes: sorted });
     cursor += durDivs;
   });
-  if (cursor < MEASURE_DIVS) {
-    slots.push({ type: 'rest', startDiv: cursor, durDivs: MEASURE_DIVS - cursor });
+  if (cursor < measureDivs) {
+    slots.push({ type: 'rest', startDiv: cursor, durDivs: measureDivs - cursor });
   }
 
   // 3) Asignar barras (beaming) a corridas de corcheas/semicorcheas
@@ -1182,4 +1465,3 @@ function escapeXml(s) {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&apos;');
 }
-

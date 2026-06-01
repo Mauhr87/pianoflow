@@ -141,7 +141,7 @@ const Player = {
     // Guardar la posición exacta dentro del compás para reanudar desde ahí.
     if (this.session) {
       const beatSec    = (60 / this.session.origBpm) / this.speedFactor;
-      const measureMs  = 4 * beatSec * 1000;
+      const measureMs  = this._measureBeats() * beatSec * 1000;
       const elapsed    = performance.now() - this._measureStartAt;
       this._pausedOffsetMs = Math.min(Math.max(0, elapsed), measureMs);
     }
@@ -172,7 +172,7 @@ const Player = {
 
     const measure = this.session.measures[this.currentMeasure];
     const beatSec = (60 / this.session.origBpm) / this.speedFactor;
-    const measureBeats = 4;             // v1 fijo en 4/4
+    const measureBeats = this._measureBeats();
     const measureMs    = measureBeats * beatSec * 1000;
 
     // Reanudar desde la posición exacta donde se pausó (0 en un compás nuevo).
@@ -855,8 +855,9 @@ const Player = {
       if (minTop !== Infinity) { top = minTop; height = maxBot - minTop; }
     }
 
-    // Centros x de cada cabeza de nota (fallback a g.note). Agrupamos las
-    // que coinciden (acordes / ambas manos) usando un umbral de ~4px.
+    // Centros x de cada cabeza de nota (fallback a g.note). En acordes con
+    // segundas/séptimas Verovio desplaza algunas cabezas horizontalmente; las
+    // agrupamos con tolerancia para que un acorde denso siga siendo un step.
     let heads = g.querySelectorAll('g.notehead');
     if (!heads.length) heads = g.querySelectorAll('g.note');
     const raw = [];
@@ -868,7 +869,7 @@ const Player = {
     raw.sort((a, b) => a - b);
     const xs = [];
     raw.forEach(x => {
-      if (!xs.length || Math.abs(x - xs[xs.length - 1]) > 4) xs.push(x);
+      if (!xs.length || Math.abs(x - xs[xs.length - 1]) > 14) xs.push(x);
     });
 
     return { xs, left, top, width, height };
@@ -900,10 +901,8 @@ const Player = {
     let x;
     if (geom.xs.length === total && geom.xs[si] !== undefined) {
       x = geom.xs[si];
-    } else if (geom.xs.length && geom.xs[si] !== undefined) {
-      x = geom.xs[si];
     } else {
-      x = geom.left + (beat / 4) * geom.width;
+      x = geom.left + (beat / this._measureBeats()) * geom.width;
     }
     this._setPlayhead(x, geom.top, geom.height);
   },
@@ -915,6 +914,14 @@ const Player = {
     if (!geom) return;
     const x = geom.xs.length ? geom.xs[0] : geom.left;
     this._setPlayhead(x, geom.top, geom.height);
+  },
+
+  _measureBeats() {
+    if (this.session && this.session.measureBeats) return this.session.measureBeats;
+    const sig = String(this.session?.timeSig || '4/4').split('/');
+    const beats = parseInt(sig[0], 10) || 4;
+    const beatType = parseInt(sig[1], 10) || 4;
+    return beats * (4 / beatType);
   },
 
   // Scroll horizontal del sheet-frame para centrar el compás activo
