@@ -3109,8 +3109,10 @@ function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 // - Divisions = 4 (cuarto = 4 divs, corchea = 2, semi = 1)
 // - Time signature 4/4, key signature 0 fifths (sin armadura), tempo
 //   en el primer compás.
-// - Cada compás lleva una <direction><words> con el nombre del acorde
-//   arriba del pentagrama (Verovio lo dibuja con su tipografía).
+// - Los símbolos de acorde se muestran solo cuando ayudan al objetivo
+//   pedagógico del módulo. En ejercicios melódicos puros se ocultan para
+//   que el estudiante lea frase, escala y dirección sin confundirlos con
+//   notas de mano derecha.
 
 const DIVISIONS = 12;             // divisiones por negra (12 = admite binario y tresillos)
 const BEATS_PER_MEASURE = 4;
@@ -3126,6 +3128,7 @@ SessionGenerator.toMusicXML = function (session) {
   const beats = parseInt(sig[0], 10) || 4;
   const beatType = parseInt(sig[1], 10) || 4;
   const measureDivs = Math.round(beats * DIVISIONS * (4 / beatType));
+  const showChordSymbols = shouldShowChordSymbols(session);
 
   let xml = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
   xml += '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n';
@@ -3152,17 +3155,18 @@ SessionGenerator.toMusicXML = function (session) {
       xml += `      <direction placement="above"><direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>${bpm}</per-minute></metronome></direction-type><sound tempo="${bpm}"/></direction>\n`;
     }
 
-    // Etiquetas de acorde como <words> encima del pentagrama. Si el compás
-    // trae varios acordes (chordSegs), cada nombre se alinea con su pulso
-    // mediante <offset>; si no, se usa el string único m.chord en el pulso 1.
-    if (m.chordSegs && m.chordSegs.length) {
+    // Línea de armonía como <words> encima del sistema. No representa una
+    // mano específica: es contexto armónico cuando el módulo lo necesita.
+    if (showChordSymbols && m.chordSegs && m.chordSegs.length) {
       m.chordSegs.forEach(seg => {
         const offDivs = Math.round((seg.beat || 0) * DIVISIONS);
         const offset  = offDivs > 0 ? `<offset>${offDivs}</offset>` : '';
-        xml += `      <direction placement="above"><direction-type><words font-weight="bold">${escapeXml(seg.label)}</words></direction-type>${offset}</direction>\n`;
+        const label = displayChordSymbolLabel(session, seg.label);
+        if (label) xml += `      <direction placement="above"><direction-type><words font-weight="bold">${escapeXml(label)}</words></direction-type>${offset}</direction>\n`;
       });
-    } else if (m.chord) {
-      xml += `      <direction placement="above"><direction-type><words font-weight="bold">${escapeXml(m.chord)}</words></direction-type></direction>\n`;
+    } else if (showChordSymbols && m.chord) {
+      const label = displayChordSymbolLabel(session, m.chord);
+      if (label) xml += `      <direction placement="above"><direction-type><words font-weight="bold">${escapeXml(label)}</words></direction-type></direction>\n`;
     }
 
     // Voz 1 / staff 1 (treble - mano derecha)
@@ -3181,6 +3185,48 @@ SessionGenerator.toMusicXML = function (session) {
   xml += '</score-partwise>\n';
   return xml;
 };
+
+function shouldShowChordSymbols(session) {
+  const meta = (session && session.meta) || {};
+  if (meta.hideChordSymbols === true) return false;
+  if (meta.showChordSymbols === true) return true;
+
+  switch (meta.modeKey) {
+    case 'chords':
+    case 'accompaniment':
+    case 'arpeggios':
+    case 'melodyArrangement':
+    case 'voicings':
+      return true;
+
+    case 'melodic':
+      return meta.techniqueKey === 'applied' ||
+             meta.techniqueKey === 'application' ||
+             hasBassSupport(session);
+
+    case 'coordination':
+      return meta.techniqueKey === 'bassChords' ||
+             meta.techniqueKey === 'fixedMoving' ||
+             meta.techniqueKey === 'technicalApplication';
+
+    default:
+      return true;
+  }
+}
+
+function hasBassSupport(session) {
+  return !!(session && session.measures || []).some(m => (m.bass || []).length);
+}
+
+function displayChordSymbolLabel(session, label) {
+  const raw = String(label || '').trim();
+  if (!raw) return '';
+  const meta = (session && session.meta) || {};
+  if (meta.modeKey === 'melodic') {
+    return raw.split('/')[0].trim();
+  }
+  return raw;
+}
 
 // Serializa las notas de UN pentagrama agrupando ataques simultáneos
 // como acordes, rellenando los huecos con silencios y agrupando corcheas
