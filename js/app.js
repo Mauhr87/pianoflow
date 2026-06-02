@@ -93,7 +93,7 @@ const App = {
         contHost.innerHTML = `
           <button type="button" class="qa-card qa-cont-card" data-id="${last.id}">
             <span class="qa-eyebrow">Seguir practicando</span>
-            <span class="qa-cont-title">${last.techIcon || (mode && mode.icon) || '🎵'} ${last.title}</span>
+            <span class="qa-cont-title">${this._iconHtml(last.techIcon || (mode && mode.icon) || '🎵')} ${last.title}</span>
             <span class="qa-cont-sub">${mode ? mode.label : ''}${done ? ' · ✓ completada' : ''}</span>
           </button>`;
         contHost.querySelector('.qa-cont-card').onclick = () => this.startPractice(last.id);
@@ -114,7 +114,7 @@ const App = {
         const countBadge = favs.length > 3 ? `<span class="qa-fav-count">${favs.length}</span>` : '';
         favHost.innerHTML = `<span class="qa-eyebrow">★ Favoritos${countBadge}</span>
           <div class="qa-fav-row">${favs.map(p =>
-            `<button type="button" class="qa-fav-chip" data-id="${p.id}">${p.techIcon || '🎵'} ${p.title}</button>`
+            `<button type="button" class="qa-fav-chip" data-id="${p.id}">${this._iconHtml(p.techIcon || '🎵')} ${p.title}</button>`
           ).join('')}</div>`;
         favHost.querySelectorAll('.qa-fav-chip').forEach(c =>
           c.onclick = () => this.startPractice(c.dataset.id));
@@ -204,7 +204,7 @@ const App = {
     Object.entries(mode.techniques).forEach(([techKey, tech]) => {
       if (!(tech.exercises || []).length) return;
       const active = this.techniqueFilter === techKey ? 'active' : '';
-      html += `<button class="filter-pill ${active}" data-tech="${techKey}">${tech.icon} ${tech.label}</button>`;
+      html += `<button class="filter-pill ${active}" data-tech="${techKey}">${this._iconHtml(tech.icon)} ${tech.label}</button>`;
     });
     host.innerHTML = html;
 
@@ -264,7 +264,7 @@ const App = {
       const subset = items.filter(p => p.technique === techKey);
       if (!subset.length) return;
 
-      html += `<div class="item-group-label">${tech.icon} ${tech.label}</div>`;
+      html += `<div class="item-group-label">${this._iconHtml(tech.icon)} ${tech.label}</div>`;
 
       // Subgrupos por nivel
       PracticeLibrary.levelOrder.forEach(level => {
@@ -297,7 +297,7 @@ const App = {
     return `
       <div class="item-card ${done ? 'done' : ''}" data-id="${p.id}">
         <button type="button" class="ic-main">
-          <span class="ic-icon">${p.techIcon || p.icon || '🎵'}</span>
+          <span class="ic-icon">${this._iconHtml(p.techIcon || p.icon || '🎵')}</span>
           <span class="ic-body">
             <span class="ic-title">${p.n}. ${p.title}</span>
             <span class="ic-sub">${sub}</span>
@@ -308,6 +308,13 @@ const App = {
           <span class="check-ring">${done ? '✓' : ''}</span>
         </button>
       </div>`;
+  },
+
+  _iconHtml(icon) {
+    if (icon === '⏹') {
+      return '<span class="pf-tech-icon pf-tech-icon-block" aria-hidden="true"><span></span><span></span><span></span></span>';
+    }
+    return icon || '🎵';
   },
 
   toggleComplete(id) {

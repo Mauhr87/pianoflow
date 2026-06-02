@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pianoflow-pwa-v2';
+const CACHE_NAME = 'pianoflow-pwa-v4';
 
 const APP_ASSETS = [
   './',
@@ -8,7 +8,7 @@ const APP_ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
-  './css/styles.css?v=visual-refresh-4',
+  './css/styles.css?v=visual-refresh-5',
   './js/chord-library.js',
   './js/pattern-library.js',
   './js/practice-library.js?v=fingering-melodies-1',
@@ -19,7 +19,7 @@ const APP_ASSETS = [
   './js/notation-engine.js',
   './js/session-generator.js?v=fingering-melodies-1',
   './js/player.js?v=accompaniment-full-1',
-  './js/app.js?v=fingering-melodies-1'
+  './js/app.js?v=app-safe-area-2'
 ];
 
 self.addEventListener('install', event => {
