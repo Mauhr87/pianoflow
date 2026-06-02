@@ -4,15 +4,21 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#16454f">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>PianoFlow</title>
-<link rel="stylesheet" href="css/styles.css?v=visual-refresh-3">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="stylesheet" href="css/styles.css?v=visual-refresh-4">
 </head>
 <body>
 
 <!-- ── Cabecera ─────────────────────────────────────── -->
 <header class="app-header">
   <button class="brand" type="button" onclick="App.goHome()">
-    <span class="brand-mark">🎹</span>
+    <span class="brand-mark"><img src="icon.jpg" alt="" aria-hidden="true"></span>
     <span>Piano<span>Flow</span></span>
   </button>
   <span class="progress-badge" id="progress-badge" hidden>v1</span>
@@ -216,6 +222,13 @@
 <script src="js/session-generator.js?v=fingering-melodies-1"></script>
 <script src="js/player.js?v=accompaniment-full-1"></script>
 <script src="js/app.js?v=fingering-melodies-1"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js');
+  });
+}
+</script>
 
 </body>
 </html>

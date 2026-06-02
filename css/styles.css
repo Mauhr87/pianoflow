@@ -1076,6 +1076,13 @@ h2 { letter-spacing: 0; }
   background: rgba(255, 255, 255, .11);
   border-radius: 8px;
 }
+.brand-mark img {
+  width: 28px;
+  height: 28px;
+  display: block;
+  border-radius: 6px;
+  object-fit: cover;
+}
 .progress-badge {
   color: #173b31;
   background: var(--lime);
