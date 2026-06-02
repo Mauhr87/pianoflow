@@ -8,7 +8,7 @@
  *   - keyEl(midi)                    devuelve el DOM element de una tecla
  *
  * El teclado cubre A0 (MIDI 21) hasta C8 (MIDI 108) — 88 teclas.
- * El contenedor padre debe permitir scroll horizontal para mobile.
+ * Ajusta el tamaño de las teclas al ancho disponible del contenedor.
  */
 
 const PianoEngine = {
@@ -35,33 +35,53 @@ const PianoEngine = {
   activeHL: new Map(),
 
   container: null,
+  resizeObserver: null,
 
   // ── Inicialización ───────────────────────────────────────────────
 
   init(containerEl) {
     this.container = containerEl;
-    this._adaptToViewport();
     this._buildKeyTable();
+    this._adaptToContainer();
     this._render();
+    this._watchSize();
     return this;
   },
 
-  _adaptToViewport() {
-    // < 760px → teléfono (teclas pequeñas)
-    // 760–1180px → tablet (teclas medianas, siempre 88 teclas)
-    // > 1180px → escritorio
+  _adaptToContainer() {
+    const scroller = this.container && this.container.parentElement;
+    const styles = scroller ? window.getComputedStyle(scroller) : null;
+    const padX = styles
+      ? parseFloat(styles.paddingLeft || 0) + parseFloat(styles.paddingRight || 0)
+      : 0;
+    const available = Math.max(0, (scroller ? scroller.clientWidth : window.innerWidth) - padX);
+
     const isPhone  = window.matchMedia('(max-width: 760px)').matches;
     const isTablet = window.matchMedia('(min-width: 761px) and (max-width: 1180px)').matches;
-    if (isPhone) {
-      this.WW = 15; this.WH = 96;
-      this.BW = 10; this.BH = 60;
-    } else if (isTablet) {
-      this.WW = 17; this.WH = 112;
-      this.BW = 11; this.BH = 70;
-    } else {
-      this.WW = 20; this.WH = 130;
-      this.BW = 13; this.BH = 82;
-    }
+    const maxWW = isPhone ? 15 : (isTablet ? 17 : 20);
+    const fitWW = this.wCount ? available / this.wCount : maxWW;
+    this.WW = Math.max(5.4, Math.min(maxWW, Math.floor(fitWW * 100) / 100));
+    this.WH = Math.round(this.WW * 6.5);
+    this.BW = Math.max(4, Math.round(this.WW * .65));
+    this.BH = Math.round(this.WH * .63);
+  },
+
+  _watchSize() {
+    const scroller = this.container && this.container.parentElement;
+    if (!scroller || typeof ResizeObserver === 'undefined') return;
+    if (this.resizeObserver) this.resizeObserver.disconnect();
+    this.resizeObserver = new ResizeObserver(() => {
+      const prevWidth = this.WW;
+      this._adaptToContainer();
+      if (Math.abs(prevWidth - this.WW) < .05) return;
+      const active = [...this.activeHL.entries()];
+      this._render();
+      active.forEach(([midi, cls]) => {
+        const el = this.keyEl(midi);
+        if (el) el.classList.add(cls);
+      });
+    });
+    this.resizeObserver.observe(scroller);
   },
 
   _buildKeyTable() {
