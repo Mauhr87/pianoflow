@@ -1943,7 +1943,7 @@ const SessionGenerator = {
           const support = this._arrangementSupportVoicing(v, ev.midi, effective);
           support.forEach(midi => treble.push({ midi, beat: s.beat + ev.beat, duration: Math.min(ev.dur, s.dur - ev.beat) }));
         }
-        treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
+        treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur, fingerRole: 'melody' });
       });
       this._arrangementBass(v, s.dur, effective).forEach(ev => {
         bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
@@ -3129,6 +3129,7 @@ SessionGenerator.toMusicXML = function (session) {
   const beatType = parseInt(sig[1], 10) || 4;
   const measureDivs = Math.round(beats * DIVISIONS * (4 / beatType));
   const showChordSymbols = shouldShowChordSymbols(session);
+  const fingeringContext = createFingeringContext(session);
 
   let xml = '<?xml version="1.0" encoding="UTF-8" standalone="no"?>\n';
   xml += '<!DOCTYPE score-partwise PUBLIC "-//Recordare//DTD MusicXML 3.1 Partwise//EN" "http://www.musicxml.org/dtds/partwise.dtd">\n';
@@ -3170,13 +3171,13 @@ SessionGenerator.toMusicXML = function (session) {
     }
 
     // Voz 1 / staff 1 (treble - mano derecha)
-    xml += emitStaff(m.treble, 1, 1, measureDivs);
+    xml += emitStaff(m.treble, 1, 1, measureDivs, fingeringContext);
 
     // Backup al inicio del compás para escribir el bajo
     xml += `      <backup><duration>${measureDivs}</duration></backup>\n`;
 
     // Voz 5 / staff 2 (bass - mano izquierda)
-    xml += emitStaff(m.bass, 5, 2, measureDivs);
+    xml += emitStaff(m.bass, 5, 2, measureDivs, fingeringContext);
 
     xml += '    </measure>\n';
   });
@@ -3228,13 +3229,113 @@ function displayChordSymbolLabel(session, label) {
   return raw;
 }
 
+function createFingeringContext(session) {
+  return {
+    meta: (session && session.meta) || {},
+    direction: null,
+    patternIndex: 0,
+    lastMidi: null,
+    lastFinger: null,
+  };
+}
+
+function shouldFingerStaff(ctx, staff) {
+  if (!ctx || staff !== 1) return false;
+  const mode = ctx.meta && ctx.meta.modeKey;
+  return mode === 'melodic' || mode === 'melodyArrangement';
+}
+
+function shouldFingerNote(note, ctx) {
+  if (!note || !ctx) return false;
+  if (Number.isFinite(note.finger)) return true;
+  if (ctx.meta.modeKey === 'melodyArrangement') return note.fingerRole === 'melody';
+  return ctx.meta.modeKey === 'melodic';
+}
+
+function prepareNotesWithFingering(notes, staff, ctx) {
+  const cloned = (notes || []).map(n => ({ ...n }));
+  if (!shouldFingerStaff(ctx, staff)) return cloned;
+
+  const groups = new Map();
+  cloned.forEach(n => {
+    const key = Math.round((n.beat || 0) * 1000);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(n);
+  });
+
+  const targets = [...groups.values()]
+    .map(group => group
+      .filter(n => shouldFingerNote(n, ctx))
+      .sort((a, b) => b.midi - a.midi)[0])
+    .filter(Boolean)
+    .sort((a, b) => (a.beat || 0) - (b.beat || 0));
+
+  if (targets.length && targets[0].beat === 0 && ctx.lastMidi != null && targets[0].midi <= ctx.lastMidi - 5) {
+    ctx.lastMidi = null;
+    ctx.lastFinger = null;
+    ctx.patternIndex = 0;
+    ctx.direction = targets.length > 1 && targets[1].midi < targets[0].midi ? 'down' : 'up';
+  }
+
+  if (!ctx.direction && ctx.lastMidi == null && targets.length > 1) {
+    ctx.direction = targets[1].midi < targets[0].midi ? 'down' : 'up';
+  }
+
+  targets.forEach(n => {
+    n.finger = Number.isFinite(n.finger) ? n.finger : nextRightHandFinger(n, ctx);
+  });
+
+  return cloned;
+}
+
+function nextRightHandFinger(note, ctx) {
+  const midi = note.midi;
+  const meta = ctx.meta || {};
+  const pentatonic = /pentatonic|Pentat/i.test(`${meta.scaleKind || ''} ${meta.melodicResource || ''} ${meta.pattern || ''}`);
+  const arrangement = meta.modeKey === 'melodyArrangement';
+  const asc = arrangement || pentatonic ? [1, 2, 3, 4, 5] : [1, 2, 3, 1, 2, 3, 4, 5];
+  const desc = arrangement || pentatonic ? [5, 4, 3, 2, 1] : [5, 4, 3, 2, 1, 3, 2, 1];
+
+  if (ctx.lastMidi == null) {
+    const pattern = ctx.direction === 'down' ? desc : asc;
+    const finger = pattern[0];
+    ctx.lastMidi = midi;
+    ctx.lastFinger = finger;
+    ctx.patternIndex = 1;
+    return finger;
+  }
+
+  if (midi === ctx.lastMidi) return ctx.lastFinger || 1;
+
+  const nextDirection = midi < ctx.lastMidi ? 'down' : 'up';
+  if (ctx.direction !== nextDirection) {
+    ctx.direction = nextDirection;
+    ctx.patternIndex = Math.abs(midi - ctx.lastMidi) >= 5 ? 0 : 1;
+  }
+
+  const pattern = ctx.direction === 'down' ? desc : asc;
+  let finger = pattern[ctx.patternIndex % pattern.length];
+  if (Math.abs(midi - ctx.lastMidi) >= 7) {
+    finger = ctx.direction === 'down' ? 5 : 1;
+    ctx.patternIndex = 1;
+  } else {
+    ctx.patternIndex++;
+  }
+
+  ctx.lastMidi = midi;
+  ctx.lastFinger = finger;
+  return finger;
+}
+
 // Serializa las notas de UN pentagrama agrupando ataques simultáneos
 // como acordes, rellenando los huecos con silencios y agrupando corcheas
 // con barra (beaming) por pulso.
-function emitStaff(notes, voice, staff, measureDivs) {
+function emitStaff(notes, voice, staff, measureDivs, fingeringContext) {
+  const preparedNotes = prepareNotesWithFingering(notes, staff, fingeringContext);
+
   // 1) Agrupar ataques simultáneos por beat
   const groups = new Map();
-  (notes || []).forEach(n => {
+  preparedNotes.forEach(n => {
     const key = Math.round(n.beat * 1000);
     if (!groups.has(key)) groups.set(key, { beat: n.beat, notes: [] });
     groups.get(key).notes.push(n);
@@ -3271,7 +3372,7 @@ function emitStaff(notes, voice, staff, measureDivs) {
     } else {
       slot.notes.forEach((n, idx) => {
         xml += emitNote(n.midi, slot.durDivs, voice, staff, idx > 0,
-                        idx === 0 ? slot.beam : null);
+                        idx === 0 ? slot.beam : null, n.finger);
       });
     }
   });
@@ -3305,7 +3406,7 @@ function assignBeams(slots) {
   }
 }
 
-function emitNote(midi, durDivs, voice, staff, isChordNote, beam) {
+function emitNote(midi, durDivs, voice, staff, isChordNote, beam, finger) {
   const pc  = ((midi % 12) + 12) % 12;
   const step = STEP_NAMES[pc];
   const alter = STEP_ALTER[pc];
@@ -3322,6 +3423,9 @@ function emitNote(midi, durDivs, voice, staff, isChordNote, beam) {
   if (spec.triplet) s += '        <time-modification><actual-notes>3</actual-notes><normal-notes>2</normal-notes></time-modification>\n';
   s += `        <staff>${staff}</staff>\n`;
   if (beam) s += `        <beam number="1">${beam}</beam>\n`;
+  if (Number.isFinite(finger)) {
+    s += `        <notations><technical><fingering placement="above">${finger}</fingering></technical></notations>\n`;
+  }
   s += '      </note>\n';
   return s;
 }
