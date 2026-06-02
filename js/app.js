@@ -368,7 +368,14 @@ const App = {
         chords:     item.chords,
         bars:       item.bars,
         explain:    item.explain,
-        meta:       item.meta,
+        meta: {
+          ...(item.meta || {}),
+          useInversions: item.useInversions || (item.meta && item.meta.useInversions) || false,
+          arrangementPattern: item.arrangementPattern || (item.meta && item.meta.arrangementPattern) || '',
+          arrangementAccompaniment: item.arrangementAccompaniment || (item.meta && item.meta.arrangementAccompaniment) || '',
+          arrangementResource: item.arrangementResource || (item.meta && item.meta.arrangementResource) || '',
+          arrangementForm: item.arrangementForm || (item.meta && item.meta.arrangementForm) || '',
+        },
       });
       this.currentPractice = {
         ...item,
@@ -575,18 +582,42 @@ const App = {
     }
 
     if (p.mode === 'coordination') {
-      const left = this._coordinationLeftRoleName(p.meta && p.meta.coordinationPattern, p.meta && p.meta.stableBass);
-      const right = p.meta && p.meta.useInversions
-        ? 'acordes completos con inversiones cercanas'
-        : 'acordes completos';
+      const roles = this._coordinationRoles(p.technique, p.meta || {});
+      const left = roles.left;
+      const right = roles.right;
+      const resource = (p.meta && p.meta.coordinationResource) || this._coordinationPatternName(p.meta && p.meta.coordinationPattern);
       const modern = p.meta && (p.meta.useOctaves || p.meta.useTenths)
         ? ' El reto es mantener el peso de la izquierda sin desordenar la llegada de la derecha.'
         : '';
       return [
-        { title: 'Qué estás entrenando', body: `${baseExplain} Mano izquierda: ${left}. Mano derecha: ${right}. Usas ${chords}.${modern}` },
-        { title: 'Qué debes escuchar', body: 'La izquierda debe sentirse como base estable y la derecha como armonía clara; ambas manos llegan juntas cuando cambia la función armónica.' },
-        { title: 'Error común', body: 'Pensar solo en las notas y olvidar el rol de cada mano: bajo firme abajo, acorde completo arriba.' },
-        { title: 'Señal de éxito', body: 'Puedes tocar la progresión con cambios sincronizados, sonido equilibrado y sensación de acompañar una canción real.' },
+        { title: 'Qué estás entrenando', body: `${baseExplain} Recurso principal: ${resource}. Mano izquierda: ${left}. Mano derecha: ${right}. Usas ${chords}.${modern}` },
+        { title: 'Qué debes escuchar', body: 'Cada mano debe conservar su tarea: llegar junta, alternar, sostener, responder, desplazarse o mantener un patrón sin arrastrar a la otra.' },
+        { title: 'Error común', body: 'Tocar las notas correctas pero dejar que una mano copie el ritmo, peso o duración de la otra.' },
+        { title: 'Señal de éxito', body: 'Puedes repetir la progresión manteniendo pulso estable, roles claros y cambios limpios entre manos.' },
+      ];
+    }
+
+    if (p.mode === 'melodyArrangement') {
+      const resource = (p.meta && p.meta.arrangementResource) || 'melodía principal';
+      const accompaniment = this._arrangementAccompanimentName(p.meta && p.meta.arrangementAccompaniment);
+      const form = p.meta && p.meta.arrangementForm ? ` Forma: ${p.meta.arrangementForm}.` : '';
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Recurso principal: ${resource}. Acompañamiento: ${accompaniment}.${form} Usas ${chords}.` },
+        { title: 'Qué debes escuchar', body: 'La melodía debe ser la voz que canta; el bajo, los acordes, arpegios o patrones existen para sostenerla sin taparla.' },
+        { title: 'Error común', body: 'Tocar el acompañamiento con más intención que la melodía, o dejar que el patrón rompa la respiración de la frase.' },
+        { title: 'Señal de éxito', body: 'Puedes cantar mentalmente la melodía mientras tocas y sentir que el acompañamiento crea una pieza completa.' },
+      ];
+    }
+
+    if (p.mode === 'voicings') {
+      const resource = (p.meta && p.meta.voicingResource) || 'voicing cercano';
+      const texture = this._voicingTextureName(p.meta && p.meta.voicingTexture);
+      const color = p.meta && p.meta.voicingColor ? ` Color: ${p.meta.voicingColor}.` : '';
+      return [
+        { title: 'Qué estás entrenando', body: `${baseExplain} Recurso principal: ${resource}. Textura: ${texture}.${color} Usas ${chords}.` },
+        { title: 'Qué debes escuchar', body: 'El acorde debe sonar más claro, más conectado o más moderno por la distribución de sus notas, no por tocar más fuerte ni agregar notas sin intención.' },
+        { title: 'Error común', body: 'Pensar solo en el nombre del acorde y olvidar qué nota queda arriba, cuánto se mueve la mano o si el voicing realmente mejora la frase.' },
+        { title: 'Señal de éxito', body: 'Puedes tocar la progresión sintiendo continuidad entre acordes, una voz superior clara y un sonido más profesional sin perder simplicidad.' },
       ];
     }
 
@@ -700,8 +731,189 @@ const App = {
       tenthsChord: 'décimas',
       modernCoordination: 'recursos modernos de bajo',
       coordinationFinal: 'fundamental, quinta, octavas y décimas',
+      alternating: 'entrada alternada',
+      reverseAlternating: 'respuesta despues de RH',
+      sharedPulse: 'pulso compartido',
+      offbeatAlternating: 'pulso estable',
+      leftHold: 'base sostenida',
+      rightHold: 'bajo móvil',
+      pedalBass: 'nota pedal',
+      movingBassHold: 'bajo móvil',
+      fixedFifth: 'base fija con quinta',
+      ostinato: 'patrón continuo',
+      ostinatoChange: 'patrón continuo',
+      worshipOstinato: 'patrón worship',
+      walkingBass: 'bajo caminante',
+      displacedEntry: 'pulso estable',
+      bassFirst: 'pulso estable',
+      offbeatChord: 'pulso estable',
+      syncopation: 'pulso estable',
+      neverTogether: 'entrada independiente',
+      twoNotes: 'línea simple',
+      parallelMotion: 'línea paralela',
+      contraryMotion: 'línea contraria',
+      simpleVoices: 'línea simple',
     };
     return labels[pattern] || 'base armónica';
+  },
+
+  _coordinationPatternName(pattern) {
+    const labels = {
+      rootChord: 'Bajo + Acordes',
+      rootFifthChord: 'Fundamental + quinta',
+      independentBass: 'Bajo independiente simple',
+      octavesChord: 'Octavas',
+      tenthsChord: 'Décimas',
+      coordinationFinal: 'Dominio de Bajo + Acordes',
+      alternating: 'Alternancia básica',
+      reverseAlternating: 'Respuesta invertida',
+      sharedPulse: 'Pulso compartido',
+      chordTurns: 'Turnos por acorde',
+      stableAlternating: 'Alternancia estable',
+      offbeatAlternating: 'Contratiempo simple',
+      oneTwo: '1 contra 2',
+      alternatingBassFifth: 'LH alterna, RH responde',
+      preparedRest: 'Entrada preparada',
+      extendedTurns: 'Turnos extendidos',
+      octaveAlternating: 'Octavas alternadas',
+      fastAlternating: 'Alternancia rápida controlada',
+      harmonicResponse: 'Respuesta armónica',
+      modernAlternating: 'Alternancia con color',
+      alternatingFinal: 'Dominio de manos alternadas',
+      leftHold: 'LH fija, RH móvil',
+      rightHold: 'RH fija, LH móvil',
+      pedalBass: 'Pedal en LH',
+      movingBassHold: 'Acorde sostenido, bajo móvil',
+      roleSwitch: 'Cambio de rol',
+      pedalInversions: 'Pedal + inversiones',
+      fixedFifth: 'Quinta fija',
+      rightLong: 'RH pulso largo',
+      leftLong: 'LH pulso largo',
+      changingRoles: 'Roles cambiantes',
+      octavePedal: 'Pedal en octavas',
+      colorHold: 'Color sostenido',
+      advancedRoleSwitch: 'Cambio de rol avanzado',
+      modernHold: 'Mano fija moderna',
+      fixedMovingFinal: 'Dominio mano fija + móvil',
+      melodyChords: 'Melodía + Acordes',
+      melodyFinal: 'Dominio de Melodía + Acordes',
+      bassMelody: 'Bajo + Melodía',
+      bassMelodyFinal: 'Dominio de Bajo + Melodía',
+      ostinato: 'Ostinato',
+      ostinatoChange: 'Ostinato con cambio',
+      patternLongEvent: 'Patrón + evento largo',
+      stableOstinato: 'Ostinato estable',
+      worshipOstinato: 'Patrón worship',
+      patternInversions: 'Patrón + inversión',
+      octaveOstinato: 'Octavas continuas',
+      patternWithSpaces: 'Continuidad contra silencio',
+      prolongedPattern: 'Patrón prolongado',
+      walkingBass: 'Bajo caminante simple',
+      longCycle: 'Ciclo extendido',
+      modernPattern: 'Patrón moderno',
+      widePattern: 'Registro amplio',
+      continuousFinal: 'Dominio de patrón continuo',
+      independentFinal: 'Dominio de Bajo Independiente',
+      displacedEntry: 'Entrada desplazada',
+      syncopation: 'Síncopa simple',
+      neverTogether: 'Manos nunca coinciden',
+      displacedFinal: 'Dominio de Ritmos Desplazados',
+      callResponse: 'Pregunta y respuesta',
+      countermelody: 'Contramelodía',
+      counterFinal: 'Dominio de Contramelodías',
+      twoNotes: 'Dos notas coordinadas',
+      parallelMotion: 'Movimiento paralelo',
+      contraryMotion: 'Movimiento contrario',
+      technicalCallResponse: 'Pregunta y respuesta técnica',
+      simpleVoices: 'Dos voces simples',
+      longShort: 'Duraciones distintas',
+      stepsVsLeaps: 'Escalones contra saltos',
+      leapsVsSteps: 'Saltos contra escalones',
+      staggeredVoices: 'Voces en espacios',
+      coordinatedLines: 'Líneas coordinadas',
+      continuousContrary: 'Movimiento contrario continuo',
+      colorLines: 'Líneas con color',
+      fixedUpper: 'Voz superior fija',
+      wideVoices: 'Registro amplio',
+      simpleVoicesFinal: 'Dominio de dos voces simples',
+      applicationMixed: 'Combinación de recursos',
+      applicationFinal: 'Proyecto final de coordinación',
+      technicalMixedBasic: 'Coordinación combinada básica',
+      technicalMixedIntermediate: 'Coordinación mixta intermedia',
+      technicalMixedAdvanced: 'Coordinación combinada avanzada',
+      technicalFinal: 'Proyecto técnico de coordinación',
+    };
+    return labels[pattern] || 'Coordinación de manos';
+  },
+
+  _coordinationRoles(technique, meta) {
+    if (technique === 'alternatingHands') return { left: this._coordinationLeftRoleName(meta.coordinationPattern, meta.stableBass), right: 'respuesta alternada o acorde en turno' };
+    if (technique === 'fixedMoving') return { left: this._coordinationLeftRoleName(meta.coordinationPattern, meta.stableBass), right: 'mano móvil o sostenida según el rol del compás' };
+    if (technique === 'continuousPattern') return { left: 'patrón continuo automático', right: 'entrada simple que no detiene el patrón' };
+    if (technique === 'simpleVoices') return { left: 'línea simple coordinada', right: 'línea simple coordinada' };
+    if (technique === 'technicalApplication') return { left: 'función técnica cambiante', right: 'función técnica complementaria' };
+    if (technique === 'melodyChords') return { left: 'bajo sencillo', right: 'melodía superior con armonía debajo' };
+    if (technique === 'bassMelody') return { left: this._coordinationLeftRoleName(meta.coordinationPattern, meta.stableBass), right: 'una sola línea melódica clara' };
+    if (technique === 'independentBass') return { left: 'patrón de bajo autónomo', right: 'melodía, frase o fragmento armónico independiente' };
+    if (technique === 'displacedRhythms') return { left: 'pulso estable', right: 'entrada desplazada, síncopa o respuesta rítmica' };
+    if (technique === 'countermelodies') return { left: 'contramelodía o respuesta musical', right: 'voz principal' };
+    if (technique === 'application') return { left: 'función cambiante según la sección', right: 'melodía, acordes o respuesta según el recurso principal' };
+    return {
+      left: this._coordinationLeftRoleName(meta.coordinationPattern, meta.stableBass),
+      right: meta.useInversions ? 'acordes completos con inversiones cercanas' : 'acordes completos',
+    };
+  },
+
+  _arrangementAccompanimentName(key) {
+    const labels = {
+      none: 'melodía sola',
+      bassLong: 'bajo largo',
+      bass: 'bajo simple',
+      bassSparse: 'bajo con espacios',
+      rootFifth: 'fundamental + quinta',
+      alternatingBass: 'bajo alternado',
+      balladBass: 'bajo de balada',
+      octaves: 'octavas',
+      octaveFifth: 'octava + quinta',
+      walking: 'bajo caminante',
+      modernBass: 'bajo moderno',
+      wideBass: 'bajo amplio',
+      mixedBass: 'bajos combinados',
+      chordVoicing: 'acordes/voicings bajo la melodía',
+      openVoicing: 'voicings abiertos',
+      bassChords: 'bajo + acordes simples',
+      arpeggio: 'arpegio simple',
+      arpeggioDown: 'arpegio descendente',
+      openArpeggio: 'arpegio abierto',
+      balladArpeggio: 'arpegio de balada',
+      extendedArpeggio: 'arpegio extendido',
+      wideArpeggio: 'arpegio amplio',
+      alberti: 'Alberti',
+      worship: 'patrón worship',
+      mixedPattern: 'combinación de patrones',
+      mixedTexture: 'cambio de textura',
+      layered: 'crecimiento por capas',
+      fullArrangement: 'arreglo completo',
+    };
+    return labels[key] || 'acompañamiento aplicado';
+  },
+
+  _voicingTextureName(key) {
+    const labels = {
+      closed: 'voicing cerrado con inversión cercana',
+      compare: 'comparación de soluciones',
+      colorCompare: 'comparación de colores',
+      colorResolve: 'color que resuelve',
+      open: 'voicing abierto',
+      openBass: 'bajo + voicing abierto',
+      openTop: 'voicing abierto con melodía arriba',
+      bassVoicing: 'bajo + voicing conectado',
+      topVoice: 'melodía en voz superior',
+      modern: 'textura moderna',
+      wide: 'registro amplio',
+      full: 'textura completa',
+    };
+    return labels[key] || 'voicing aplicado';
   },
 
   _triadFamily(chords) {

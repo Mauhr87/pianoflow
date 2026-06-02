@@ -39,8 +39,22 @@ const SessionGenerator = {
     // ── Currículum fiel: COORDINACIÓN → BAJO + ACORDES ──────────────
     // LH sostiene base armónica; RH toca acordes completos. La dificultad
     // crece por coordinación funcional, no por armonía excesiva.
-    if (config.mode === 'coordination' && config.technique === 'bassChords') {
+    if (config.mode === 'coordination') {
       return this._generateBassChordsCoordination(config, mode, tech, style, diff);
+    }
+
+    // ── Currículum fiel: MELODÍA Y ARREGLO ──────────────────────────
+    // RH siempre presenta una melodía principal; LH y/o voces internas
+    // aplican bajo, acordes, arpegios, Alberti, patrones, voicings y forma.
+    if (config.mode === 'melodyArrangement') {
+      return this._generateMelodyArrangement(config, mode, tech, style, diff);
+    }
+
+    // ── Currículum fiel: VOICINGS ───────────────────────────────────
+    // RH trabaja distribución de voces, nota superior, colores, apertura
+    // y movimiento mínimo; LH sostiene raíz, bajo amplio o patrón suave.
+    if (config.mode === 'voicings') {
+      return this._generateVoicings(config, mode, tech, style, diff);
     }
 
     // Lectura a primera vista: piezas leíbles (melodía + bajo) que crecen en
@@ -977,8 +991,10 @@ const SessionGenerator = {
         const { treble, bass } = this._coordinationMeasure(segments, chooseVoicing, {
           pattern,
           stageKey: stage.key,
+          techniqueKey: config.technique,
           stableBass,
           stableLabel: prog[0],
+          globalMeasure: mi,
         });
         measures.push({
           index: mi,
@@ -1017,7 +1033,8 @@ const SessionGenerator = {
         bpm: finalBpm, pending: false,
         explain: config.explain || '',
         leftRole: this._coordinationLeftRole(pattern, stableBass),
-        rightRole: 'Armonía completa',
+        rightRole: this._coordinationRightRole(config.technique, pattern),
+        coordinationResource: (config.meta && config.meta.coordinationResource) || this._coordinationPatternLabel(pattern),
       },
     };
   },
@@ -1049,6 +1066,18 @@ const SessionGenerator = {
   },
 
   _coordinationMeasure(segments, chooseVoicing, opts) {
+    if (opts.techniqueKey === 'alternatingHands') return this._alternatingCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'fixedMoving') return this._fixedMovingCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'continuousPattern') return this._independentBassCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'simpleVoices') return this._countermelodyCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'technicalApplication') return this._applicationCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'melodyChords') return this._melodyChordsCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'bassMelody') return this._bassMelodyCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'independentBass') return this._independentBassCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'displacedRhythms') return this._displacedCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'countermelodies') return this._countermelodyCoordinationMeasure(segments, chooseVoicing, opts);
+    if (opts.techniqueKey === 'application') return this._applicationCoordinationMeasure(segments, chooseVoicing, opts);
+
     const treble = [];
     const bass = [];
     const stable = opts.stableBass ? chooseVoicing(opts.stableLabel) : null;
@@ -1061,6 +1090,168 @@ const SessionGenerator = {
       bassEvents.forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
     });
     return { treble, bass };
+  },
+
+  _alternatingCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const pat = opts.pattern;
+      const reverse = pat === 'reverseAlternating';
+      const offbeat = ['offbeatAlternating', 'modernAlternating', 'harmonicResponse'].includes(pat);
+      const fast = ['fastAlternating', 'alternatingFinal'].includes(pat);
+      const oct = pat === 'octaveAlternating' || opts.useOctaves;
+      const bassNotes = oct ? [v.root, v.root + 12] : [v.root];
+      const bassBeats = fast ? [0, 1] : [reverse ? 1 : 0];
+      const rhBeats = fast ? [0.5, 1.5] : (offbeat ? [0.5, 1.5] : [reverse ? 0 : 1]);
+      bassBeats.filter(b => b < s.dur).forEach((b, i) => {
+        const midi = bassNotes[i % bassNotes.length] + (pat === 'alternatingBassFifth' && i % 2 ? 7 : 0);
+        bass.push({ midi, beat: s.beat + b, duration: Math.min(0.75, s.dur - b) });
+      });
+      rhBeats.filter(b => b < s.dur).forEach((b, i) => {
+        const notes = pat === 'oneTwo' || pat === 'preparedRest'
+          ? [this._coordMelodyMidi(v, opts.globalMeasure + si + i, 74)]
+          : v.rh;
+        notes.forEach(midi => treble.push({ midi, beat: s.beat + b, duration: Math.min(0.75, s.dur - b) }));
+      });
+    });
+    return { treble, bass };
+  },
+
+  _fixedMovingCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    const stable = opts.stableBass ? chooseVoicing(opts.stableLabel) : null;
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const pat = opts.pattern;
+      const holdLeft = ['leftHold', 'pedalBass', 'pedalInversions', 'fixedFifth', 'leftLong', 'octavePedal'].includes(pat)
+        || (pat === 'roleSwitch' && (opts.globalMeasure + si) % 2 === 0)
+        || (pat === 'changingRoles' && (opts.globalMeasure + si) % 2 === 0);
+      const holdRight = ['rightHold', 'movingBassHold', 'rightLong', 'colorHold', 'modernHold', 'fixedUpper'].includes(pat)
+        || (pat === 'roleSwitch' && (opts.globalMeasure + si) % 2 === 1)
+        || (pat === 'advancedRoleSwitch' && (opts.globalMeasure + si) % 2 === 1);
+      const source = stable || v;
+      if (holdLeft) {
+        const leftNotes = pat === 'octavePedal' ? [source.root, source.root + 12] : (pat === 'fixedFifth' ? [source.root, source.root + 7] : [source.root]);
+        leftNotes.forEach(midi => bass.push({ midi, beat: s.beat, duration: s.dur }));
+        [0, Math.min(1, s.dur - 0.5)].filter(b => b >= 0 && b < s.dur).forEach(b => {
+          v.rh.forEach(midi => treble.push({ midi, beat: s.beat + b, duration: Math.min(0.75, s.dur - b) }));
+        });
+        return;
+      }
+      if (holdRight) {
+        v.rh.forEach(midi => treble.push({ midi, beat: s.beat, duration: s.dur }));
+        this._coordinationBassEvents(v, s.dur, opts.useOctaves ? 'octavesChord' : 'rootFifthChord')
+          .forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+        return;
+      }
+      v.rh.forEach(midi => treble.push({ midi, beat: s.beat, duration: Math.min(1, s.dur) }));
+      bass.push({ midi: v.root, beat: s.beat, duration: s.dur });
+    });
+    return { treble, bass };
+  },
+
+  _melodyChordsCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const melody = this._coordMelodyNotes(v, opts.globalMeasure + si, s.dur, 76);
+      const chordDur = Math.min(1, s.dur);
+      const bassEvents = this._coordinationBassEvents(v, s.dur, opts.pattern === 'melodyOctaves' ? 'octavesChord' : (opts.pattern === 'melodyFinal' ? 'rootFifthChord' : 'rootChord'));
+      bassEvents.forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+      melody.forEach(ev => {
+        const support = v.rh.filter(n => n < ev.midi).slice(0, opts.pattern === 'melodyFragments' ? 2 : 3);
+        support.forEach(midi => treble.push({ midi, beat: s.beat + ev.beat, duration: Math.min(ev.dur, chordDur) }));
+        treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
+      });
+    });
+    return { treble, bass };
+  },
+
+  _bassMelodyCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const phrase = this._coordMelodyNotes(v, opts.globalMeasure + si, s.dur, 72, opts.pattern === 'bassMelodySpace');
+      phrase.forEach(ev => treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+      const bassPattern = opts.pattern === 'octaveBassMelody' || opts.pattern === 'bassMelodyFinal'
+        ? 'octavesChord'
+        : (opts.pattern === 'rootFifthMelody' || opts.pattern === 'activeBassMelody' || opts.pattern === 'instrumentalBassMelody' ? 'rootFifthChord' : 'rootChord');
+      this._coordinationBassEvents(v, s.dur, bassPattern).forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+    });
+    return { treble, bass };
+  },
+
+  _independentBassCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      this._coordIndependentBassEvents(v, s.dur, opts.pattern).forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+      const melody = this._coordMelodyNotes(v, opts.globalMeasure + si, s.dur, 74, false, 1);
+      melody.forEach(ev => treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+    });
+    return { treble, bass };
+  },
+
+  _displacedCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const noTogether = opts.pattern === 'neverTogether';
+      const bassBeats = noTogether ? [0, 1, 2, 3].filter(b => b < s.dur) : [0, Math.min(2, s.dur - 0.5)].filter(b => b >= 0 && b < s.dur);
+      bassBeats.forEach((b, i) => bass.push({ midi: i % 2 ? v.root + 7 : v.root, beat: s.beat + b, duration: Math.min(0.5, s.dur - b) }));
+      const shift = noTogether ? 0.5 : (opts.pattern === 'syncopation' || opts.pattern === 'worshipDisplaced' ? 0.5 : 1);
+      const rhBeats = [shift, shift + 1.5].filter(b => b < s.dur);
+      rhBeats.forEach((b, i) => {
+        const notes = opts.pattern === 'bassFirst' || opts.pattern === 'melodyAgainstPulse'
+          ? [this._coordMelodyMidi(v, opts.globalMeasure + si + i, 76)]
+          : v.rh;
+        notes.forEach(midi => treble.push({ midi, beat: s.beat + b, duration: Math.min(0.75, s.dur - b) }));
+      });
+    });
+    return { treble, bass };
+  },
+
+  _countermelodyCoordinationMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const main = this._coordMelodyNotes(v, opts.globalMeasure + si, s.dur, 76, opts.pattern === 'spacesCounter', 1);
+      const counter = this._coordCounterNotes(v, opts.globalMeasure + si, s.dur, opts.pattern);
+      main.forEach(ev => treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+      counter.forEach(ev => bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur }));
+    });
+    return { treble, bass };
+  },
+
+  _applicationCoordinationMeasure(segments, chooseVoicing, opts) {
+    const pattern = this._applicationCoordinationPattern(opts.pattern, opts.stageKey, opts.globalMeasure);
+    const scoped = { ...opts, pattern };
+    if (['alternating', 'reverseAlternating', 'sharedPulse', 'chordTurns', 'stableAlternating', 'offbeatAlternating', 'oneTwo', 'alternatingBassFifth', 'preparedRest', 'extendedTurns', 'octaveAlternating', 'fastAlternating', 'harmonicResponse', 'modernAlternating', 'alternatingFinal'].includes(pattern)) return this._alternatingCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['leftHold', 'rightHold', 'pedalBass', 'movingBassHold', 'roleSwitch', 'pedalInversions', 'fixedFifth', 'rightLong', 'leftLong', 'changingRoles', 'octavePedal', 'colorHold', 'advancedRoleSwitch', 'modernHold', 'fixedMovingFinal'].includes(pattern)) return this._fixedMovingCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['ostinato', 'ostinatoChange', 'patternLongEvent', 'ostinatoFifth', 'stableOstinato', 'worshipOstinato', 'patternInversions', 'octaveOstinato', 'patternWithSpaces', 'prolongedPattern', 'walkingBass', 'longCycle', 'modernPattern', 'widePattern', 'continuousFinal'].includes(pattern)) return this._independentBassCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['twoNotes', 'parallelMotion', 'contraryMotion', 'technicalCallResponse', 'simpleVoices', 'longShort', 'stepsVsLeaps', 'leapsVsSteps', 'staggeredVoices', 'coordinatedLines', 'continuousContrary', 'colorLines', 'fixedUpper', 'wideVoices', 'simpleVoicesFinal'].includes(pattern)) return this._countermelodyCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['displacedEntry', 'bassFirst', 'offbeatChord', 'rhythmicAnswer', 'syncopation', 'melodyAgainstPulse', 'worshipDisplaced', 'mixedDisplaced', 'continuousDisplaced', 'neverTogether', 'displacedFinal'].includes(pattern)) return this._displacedCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['melodyChords', 'melodyFinal'].includes(pattern)) return this._melodyChordsCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['bassMelody', 'bassMelodyFinal'].includes(pattern)) return this._bassMelodyCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['ostinato', 'worshipOstinato', 'independentFinal'].includes(pattern)) return this._independentBassCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['displacedEntry', 'syncopation', 'continuousDisplaced'].includes(pattern)) return this._displacedCoordinationMeasure(segments, chooseVoicing, scoped);
+    if (['countermelody', 'emotionalCounter', 'instrumentalCounter'].includes(pattern)) return this._countermelodyCoordinationMeasure(segments, chooseVoicing, scoped);
+    return this._coordinationMeasure(segments, chooseVoicing, { ...scoped, techniqueKey: 'bassChords' });
   },
 
   _effectiveCoordinationPattern(pattern, stageKey) {
@@ -1105,6 +1296,107 @@ const SessionGenerator = {
     return [{ midi: v.root, beat: 0, dur }];
   },
 
+  _coordMelodyMidi(v, seed, floor) {
+    const contour = [0, 2, 4, 5, 4, 2, 1, 0];
+    const top = Math.max(...v.rh);
+    const midi = top + contour[Math.abs(seed) % contour.length];
+    return Math.max(floor || 72, midi);
+  },
+
+  _coordMelodyNotes(v, seed, dur, floor, withSpaces, density) {
+    const step = density || 1;
+    const count = Math.max(1, Math.floor(dur / step));
+    const events = [];
+    for (let i = 0; i < count; i++) {
+      const beat = i * step;
+      if (withSpaces && i % 2 === 1) continue;
+      events.push({
+        midi: this._coordMelodyMidi(v, seed + i, floor),
+        beat,
+        dur: Math.min(step, dur - beat),
+      });
+    }
+    return events;
+  },
+
+  _coordIndependentBassEvents(v, dur, pattern) {
+    const out = [];
+    const step = 0.5;
+    const useOct = pattern === 'octaveOstinato' || pattern === 'instrumentalOstinato' || pattern === 'independentFinal' || pattern === 'widePattern' || pattern === 'continuousFinal';
+    const walking = pattern === 'walkingBass';
+    const longCycle = pattern === 'longCycle' || pattern === 'modernPattern';
+    for (let b = 0, i = 0; b < dur; b += step, i++) {
+      let midi;
+      if (walking) midi = v.root + [0, 2, 4, 5, 7, 5, 4, 2][i % 8];
+      else if (longCycle) midi = v.root + [0, 7, 12, 7, 4, 7, 12, 7][i % 8];
+      else if (useOct) midi = v.root + (i % 2 ? 12 : 0);
+      else midi = v.root + (i % 2 ? 7 : 0);
+      out.push({ midi, beat: b, dur: Math.min(step, dur - b) });
+    }
+    return out;
+  },
+
+  _coordCounterNotes(v, seed, dur, pattern) {
+    const out = [];
+    const contrary = pattern === 'contraryMotion' || pattern === 'twoVoices' || pattern === 'continuousContrary';
+    const call = pattern === 'callResponse' || pattern === 'spacesCounter' || pattern === 'technicalCallResponse' || pattern === 'staggeredVoices';
+    const step = call || pattern === 'longShort' ? 1 : 0.5;
+    const start = call ? 1 : 0;
+    for (let b = start; b < dur; b += step) {
+      const idx = Math.round((seed + b) * 2);
+      const degrees = contrary ? [7, 5, 4, 2, 0, 2, 4, 5] : [0, 2, 4, 5, 4, 2, 1, 0];
+      const octave = pattern === 'wideVoices' ? 0 : 12;
+      out.push({ midi: v.root + octave + degrees[Math.abs(idx) % degrees.length], beat: b, dur: Math.min(step, dur - b) });
+    }
+    return out;
+  },
+
+  _applicationCoordinationPattern(pattern, stageKey, globalMeasure) {
+    if (pattern === 'applicationMixed') {
+      if (stageKey === 'prep') return 'ostinato';
+      if (stageKey === 'build') return 'countermelody';
+      if (stageKey === 'challenge') return 'syncopation';
+      if (stageKey === 'application') return globalMeasure % 2 ? 'emotionalCounter' : 'worshipOstinato';
+      return 'rootChord';
+    }
+    if (pattern === 'applicationFinal') {
+      if (stageKey === 'prep') return 'rootChord';
+      if (stageKey === 'build') return 'melodyChords';
+      if (stageKey === 'challenge') return globalMeasure % 2 ? 'syncopation' : 'ostinato';
+      if (stageKey === 'application') return globalMeasure % 2 ? 'countermelody' : 'bassMelody';
+      return 'rootChord';
+    }
+    if (pattern === 'technicalMixedBasic') {
+      if (stageKey === 'prep') return 'rootChord';
+      if (stageKey === 'build') return 'alternating';
+      if (stageKey === 'challenge') return 'leftHold';
+      if (stageKey === 'application') return 'ostinato';
+      return 'rootChord';
+    }
+    if (pattern === 'technicalMixedIntermediate') {
+      if (stageKey === 'prep') return 'offbeatChord';
+      if (stageKey === 'build') return 'changingRoles';
+      if (stageKey === 'challenge') return 'patternLongEvent';
+      if (stageKey === 'application') return 'syncopation';
+      return 'rootChord';
+    }
+    if (pattern === 'technicalMixedAdvanced') {
+      if (stageKey === 'prep') return 'alternatingFinal';
+      if (stageKey === 'build') return 'modernPattern';
+      if (stageKey === 'challenge') return 'continuousDisplaced';
+      if (stageKey === 'application') return 'simpleVoicesFinal';
+      return 'rootChord';
+    }
+    if (pattern === 'technicalFinal') {
+      if (stageKey === 'prep') return 'coordinationFinal';
+      if (stageKey === 'build') return globalMeasure % 2 ? 'alternatingFinal' : 'fixedMovingFinal';
+      if (stageKey === 'challenge') return globalMeasure % 2 ? 'continuousFinal' : 'displacedFinal';
+      if (stageKey === 'application') return globalMeasure % 2 ? 'simpleVoicesFinal' : 'modernPattern';
+      return 'rootChord';
+    }
+    return pattern;
+  },
+
   _coordinationPatternLabel(pattern) {
     const labels = {
       rootChord: 'Fundamental + acorde',
@@ -1114,16 +1406,704 @@ const SessionGenerator = {
       tenthsChord: 'Décimas + acordes',
       modernCoordination: 'Coordinación moderna',
       coordinationFinal: 'Dominio de bajo + acordes',
+      alternating: 'Alternancia basica',
+      reverseAlternating: 'Respuesta invertida',
+      sharedPulse: 'Pulso compartido',
+      chordTurns: 'Turnos por acorde',
+      stableAlternating: 'Alternancia estable',
+      offbeatAlternating: 'Contratiempo simple',
+      oneTwo: 'Una entrada contra dos respuestas',
+      alternatingBassFifth: 'Bajo alternado y respuesta',
+      preparedRest: 'Entrada preparada',
+      extendedTurns: 'Turnos extendidos',
+      octaveAlternating: 'Octavas alternadas',
+      fastAlternating: 'Alternancia rapida controlada',
+      harmonicResponse: 'Respuesta armonica',
+      modernAlternating: 'Alternancia con color',
+      alternatingFinal: 'Dominio de manos alternadas',
+      leftHold: 'LH fija, RH movil',
+      rightHold: 'RH fija, LH movil',
+      pedalBass: 'Pedal en LH',
+      movingBassHold: 'Acorde sostenido, bajo movil',
+      roleSwitch: 'Cambio de rol',
+      pedalInversions: 'Pedal + inversiones',
+      fixedFifth: 'Quinta fija',
+      rightLong: 'RH en pulso largo',
+      leftLong: 'LH en pulso largo',
+      changingRoles: 'Roles cambiantes',
+      octavePedal: 'Pedal en octavas',
+      colorHold: 'Color sostenido',
+      advancedRoleSwitch: 'Cambio de rol avanzado',
+      modernHold: 'Mano fija moderna',
+      fixedMovingFinal: 'Dominio mano fija + movil',
+      melodyChords: 'Melodía + acordes',
+      melodyScale: 'Melodía escalar',
+      melodyFragments: 'Melodía + fragmentos de acorde',
+      melodyFluid: 'Melodía fluida',
+      melodyPentatonicMajor: 'Melodía pentatónica mayor',
+      melodyPentatonicMinor: 'Melodía pentatónica menor',
+      melodyVoicing: 'Melodía guiando voicings',
+      melodyOctaves: 'Melodía + octavas',
+      melodySevenths: 'Melodía + séptimas',
+      melodyFinal: 'Dominio de melodía + acordes',
+      bassMelody: 'Bajo + melodía',
+      bassMelodySpace: 'Melodía con espacios',
+      rootFifthMelody: 'Bajo fundamental + quinta',
+      scalarMelody: 'Melodía escalar',
+      pentatonicMelody: 'Melodía pentatónica',
+      minorPentatonicMelody: 'Melodía pentatónica menor',
+      octaveBassMelody: 'Bajo en octavas + melodía',
+      extendedMelody: 'Melodía extendida',
+      activeBassMelody: 'Bajo activo + melodía',
+      instrumentalBassMelody: 'Bajo + melodía instrumental',
+      bassMelodyFinal: 'Dominio de bajo + melodía',
+      ostinato: 'Ostinato',
+      ostinatoMelody: 'Ostinato + melodía',
+      ostinatoFifth: 'Ostinato fundamental + quinta',
+      worshipOstinato: 'Patrón worship',
+      continuousOstinato: 'Ostinato continuo',
+      octaveOstinato: 'Ostinato en octavas',
+      instrumentalOstinato: 'Ostinato instrumental',
+      mixedOstinato: 'Ostinatos combinados',
+      ostinatoChange: 'Ostinato con cambio',
+      patternLongEvent: 'Patron + evento largo',
+      stableOstinato: 'Ostinato estable',
+      patternInversions: 'Patron + inversion',
+      patternWithSpaces: 'Patron con espacios',
+      prolongedPattern: 'Patron prolongado',
+      walkingBass: 'Bajo caminante simple',
+      longCycle: 'Ciclo extendido',
+      modernPattern: 'Patron moderno',
+      widePattern: 'Patron en registro amplio',
+      continuousFinal: 'Dominio de patron continuo',
+      independentFinal: 'Dominio de bajo independiente',
+      displacedEntry: 'Entrada desplazada',
+      bassFirst: 'Bajo primero, melodía después',
+      offbeatChord: 'Acorde desplazado',
+      rhythmicAnswer: 'Respuesta rítmica',
+      syncopation: 'Síncopa simple',
+      melodyAgainstPulse: 'Melodía contra pulso',
+      worshipDisplaced: 'Desplazamiento worship',
+      mixedDisplaced: 'Desplazamientos combinados',
+      continuousDisplaced: 'Desplazamiento continuo',
+      neverTogether: 'Manos nunca coinciden',
+      displacedFinal: 'Dominio de ritmos desplazados',
+      callResponse: 'Pregunta y respuesta',
+      spacesCounter: 'Contramelodía en espacios',
+      contraryMotion: 'Movimiento contrario',
+      countermelody: 'Contramelodía',
+      continuousDialog: 'Diálogo continuo',
+      scalarCounter: 'Contramelodía escalar',
+      pentatonicCounter: 'Contramelodía pentatónica',
+      bassCounter: 'Bajo + contramelodía',
+      continuousCounter: 'Contramelodía continua',
+      instrumentalCounter: 'Contramelodía instrumental',
+      emotionalCounter: 'Contramelodía expresiva',
+      twoVoices: 'Dos voces independientes',
+      counterFinal: 'Dominio de contramelodías',
+      twoNotes: 'Dos notas coordinadas',
+      parallelMotion: 'Movimiento paralelo',
+      technicalCallResponse: 'Pregunta y respuesta tecnica',
+      simpleVoices: 'Dos voces simples',
+      longShort: 'Linea larga vs linea corta',
+      stepsVsLeaps: 'Escalones contra saltos',
+      leapsVsSteps: 'Saltos contra escalones',
+      staggeredVoices: 'Voces en espacios',
+      coordinatedLines: 'Lineas coordinadas',
+      continuousContrary: 'Movimiento contrario continuo',
+      colorLines: 'Dos voces con color',
+      fixedUpper: 'Voz superior fija',
+      wideVoices: 'Dos voces en registro amplio',
+      simpleVoicesFinal: 'Dominio de dos voces simples',
+      applicationMixed: 'Combinación de recursos',
+      applicationFinal: 'Proyecto final de coordinación',
+      technicalMixedBasic: 'Coordinacion combinada basica',
+      technicalMixedIntermediate: 'Coordinacion mixta intermedia',
+      technicalMixedAdvanced: 'Coordinacion combinada avanzada',
+      technicalFinal: 'Proyecto tecnico de coordinacion',
     };
     return labels[pattern] || 'Bajo + acordes';
   },
 
   _coordinationLeftRole(pattern, stableBass) {
     if (stableBass) return 'Base armónica estable';
-    if (pattern === 'rootFifthChord' || pattern === 'independentBass') return 'Fundamental + quinta';
-    if (pattern === 'octavesChord') return 'Octavas';
-    if (pattern === 'tenthsChord') return 'Décimas';
+    if (/leftHold|pedal|fixedFifth|octavePedal/i.test(pattern)) return 'Base sostenida';
+    if (/alternating|sharedPulse|chordTurns|oneTwo|preparedRest/i.test(pattern)) return 'Entrada alternada';
+    if (/Fifth|rootFifth|ostinato|Ostinato|worship|Worship|continuous|active/i.test(pattern)) return 'Fundamental + quinta';
+    if (/octave|Octave|octaves|Octaves/i.test(pattern)) return 'Octavas';
+    if (/tenth|Tenth|tenths|Tenths/i.test(pattern)) return 'Décimas';
+    if (/counter|Counter|voice|Voice|call|spaces|contrary|Voices|Motion|Lines|longShort|stepsVsLeaps|leapsVsSteps/i.test(pattern)) return 'Linea simple o respuesta';
+    if (/displaced|syncopation|offbeat|neverTogether|bassFirst/i.test(pattern)) return 'Pulso estable';
     return 'Fundamental';
+  },
+
+  _coordinationRightRole(techniqueKey, pattern) {
+    if (techniqueKey === 'alternatingHands') return 'Respuesta alternada';
+    if (techniqueKey === 'fixedMoving') return 'Mano movil o sostenida segun el rol';
+    if (techniqueKey === 'continuousPattern') return 'Entrada simple sobre patron continuo';
+    if (techniqueKey === 'simpleVoices') return 'Linea simple coordinada';
+    if (techniqueKey === 'technicalApplication') return this._coordinationPatternLabel(pattern);
+    if (techniqueKey === 'melodyChords') return 'Melodía superior con armonía debajo';
+    if (techniqueKey === 'bassMelody') return 'Línea melódica clara';
+    if (techniqueKey === 'independentBass') return 'Melodía o frase sobre bajo autónomo';
+    if (techniqueKey === 'displacedRhythms') return 'Entrada desplazada o respuesta rítmica';
+    if (techniqueKey === 'countermelodies') return 'Voz principal';
+    if (techniqueKey === 'application') return this._coordinationPatternLabel(pattern);
+    return 'Armonía completa';
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  VOICINGS
+  // ════════════════════════════════════════════════════════════════
+
+  _generateVoicings(config, mode, tech, style, diff) {
+    const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const meta = config.meta || {};
+    const pattern = meta.voicingPattern || 'nearestInversion';
+    const texture = meta.voicingTexture || 'closed';
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const plan = this._chordStagePlan(total, prog, false);
+
+    let prevMean = null;
+    const chooseVoicing = (label, stageKey, globalMeasure, segIndex) => {
+      const parsed = this._parseChord(label) || this._parseChord('C');
+      const useClosed = this._voicingUseClosed(pattern, texture, stageKey, globalMeasure, segIndex);
+      const useOpen = this._voicingUseOpen(pattern, texture, stageKey);
+      const useTop = this._voicingUseTop(pattern, texture);
+      let rh;
+      if (useClosed) {
+        rh = this._chordVoicing(label, 0) || this._chordVoicing('C', 0);
+      } else if (useTop) {
+        rh = this._topVoiceVoicing(label, prevMean, pattern, globalMeasure + segIndex);
+      } else if (useOpen) {
+        rh = this._openVoicing(label, texture, prevMean, pattern);
+      } else {
+        rh = prevMean === null
+          ? (this._chordVoicing(label, 0) || this._chordVoicing('C', 0))
+          : this._closestChordVoicing(label, prevMean).v;
+      }
+      prevMean = this._voicingMean(rh);
+      return { label, parsed, rh, root: 36 + parsed.rootPc, top: useTop };
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = stage.build(b, stage.bars);
+        const built = this._voicingMeasure(segments, chooseVoicing, {
+          pattern,
+          texture,
+          stageKey: stage.key,
+          globalMeasure: mi,
+        });
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble: built.treble,
+          bass: built.bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      measureBeats: 4,
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: meta.voicingResource || this._voicingPatternLabel(pattern),
+        patternKey: pattern,
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        voicingPattern: pattern,
+        voicingTexture: texture,
+        voicingResource: meta.voicingResource || this._voicingPatternLabel(pattern),
+        voicingColor: meta.voicingColor || '',
+      },
+    };
+  },
+
+  _voicingMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const compare = opts.texture === 'compare' || opts.texture === 'colorCompare' ||
+        /compare|Compare|closedOpen|minimumCompare|twoRoutes|multipleSolutions|professionalCompare|shortestPath/.test(opts.pattern);
+      if (compare) {
+        const closed = this._basicVoicingForCompare(s.label, false);
+        const improved = this._basicVoicingForCompare(s.label, true, opts.texture, opts.pattern);
+        const half = s.dur / 2;
+        closed.forEach(midi => treble.push({ midi, beat: s.beat, duration: half }));
+        improved.forEach(midi => treble.push({ midi, beat: s.beat + half, duration: half }));
+        const parsed = this._parseChord(s.label) || this._parseChord('C');
+        bass.push({ midi: 36 + parsed.rootPc, beat: s.beat, duration: s.dur });
+        return;
+      }
+
+      const v = chooseVoicing(s.label, opts.stageKey, opts.globalMeasure, si);
+      if (!v || !v.rh) return;
+      const supportDur = this._voicingSupportDuration(opts.texture, opts.stageKey, s.dur);
+      const addTopLine = v.top || opts.texture === 'full' || opts.texture === 'modern';
+      const support = addTopLine ? v.rh.slice(0, -1) : v.rh.slice();
+      support.forEach(midi => treble.push({ midi, beat: s.beat, duration: supportDur }));
+      if (addTopLine) {
+        this._voicingTopLine(v, s.dur, opts.pattern, opts.stageKey, opts.globalMeasure + si).forEach(ev => {
+          treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
+        });
+      } else if (supportDur < s.dur) {
+        v.rh.forEach(midi => treble.push({ midi, beat: s.beat + supportDur, duration: s.dur - supportDur }));
+      }
+      this._voicingBass(v, s.dur, opts.texture, opts.pattern).forEach(ev => {
+        bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
+      });
+    });
+    return { treble, bass };
+  },
+
+  _voicingUseClosed(pattern, texture, stageKey, globalMeasure, segIndex) {
+    if (texture === 'closed') return false;
+    if (stageKey === 'prep' && /jump|closedOpen|discover|compare/i.test(pattern)) return (globalMeasure + segIndex) % 2 === 0;
+    return false;
+  },
+
+  _voicingUseOpen(pattern, texture, stageKey) {
+    if (['open', 'openBass', 'openTop', 'wide', 'modern', 'full'].includes(texture)) return true;
+    if (/open|worship|modern|instrumental|cinematic|texture|color|Final|Project|profesional/i.test(pattern)) return true;
+    return stageKey === 'application' && texture !== 'closed';
+  },
+
+  _voicingUseTop(pattern, texture) {
+    return ['topVoice', 'openTop', 'full'].includes(texture) || /top|melody|Melod|voz|superior|pent|Guided|Voice/i.test(pattern);
+  },
+
+  _basicVoicingForCompare(label, improved, texture, pattern) {
+    if (!improved) return this._chordVoicing(label, 0) || this._chordVoicing('C', 0);
+    if (texture === 'colorCompare' || /color|discover|sus|add9|maj7|minor7/i.test(pattern || '')) {
+      return this._openVoicing(label, 'modern', null, pattern);
+    }
+    return this._openVoicing(label, 'open', null, pattern);
+  },
+
+  _openVoicing(label, texture, prevMean, pattern) {
+    const parsed = this._parseChord(label) || this._parseChord('C');
+    const base = 60 + parsed.rootPc;
+    const iv = parsed.iv || [0, 4, 7];
+    const third = iv[1] == null ? 4 : iv[1];
+    const fifth = iv.includes(7) ? 7 : (iv[2] || 7);
+    const color = iv.length > 3 ? iv[3] : (/add9|modern|worship|texture|Final|Project/i.test(pattern || '') ? 14 : null);
+    let notes;
+    if (texture === 'wide' || texture === 'full') {
+      notes = [base, base + fifth + 12, base + third + 12];
+      if (color != null) notes.push(base + color);
+    } else {
+      notes = [base + third, base + fifth, base + 12];
+      if (color != null) notes.push(base + color);
+    }
+    notes = [...new Set(notes)].map(n => {
+      while (n < 55) n += 12;
+      while (n > 88) n -= 12;
+      return n;
+    }).sort((a, b) => a - b);
+    if (prevMean !== null && notes.length >= 3 && Math.abs(this._voicingMean(notes) - prevMean) > 10) {
+      const closer = this._closestChordVoicing(label, prevMean).v;
+      if (texture !== 'wide' && texture !== 'full') notes = closer;
+    }
+    return notes;
+  },
+
+  _topVoiceVoicing(label, prevMean, pattern, seed) {
+    const parsed = this._parseChord(label) || this._parseChord('C');
+    const baseVoicing = prevMean === null
+      ? (this._chordVoicing(label, 0) || this._chordVoicing('C', 0))
+      : this._closestChordVoicing(label, prevMean).v;
+    const topInterval = this._voicingTopInterval(parsed, pattern, seed);
+    let top = 60 + parsed.rootPc + topInterval;
+    while (top < 72) top += 12;
+    while (top > 88) top -= 12;
+    const support = baseVoicing.filter(n => n < top - 1).slice(-3);
+    const fallback = baseVoicing.slice(0, Math.max(2, baseVoicing.length - 1)).map(n => n > top ? n - 12 : n);
+    return [...new Set((support.length ? support : fallback).concat(top))].sort((a, b) => a - b);
+  },
+
+  _voicingTopInterval(parsed, pattern, seed) {
+    const iv = parsed.iv || [0, 4, 7];
+    if (/add9|modern|worship|cinematic|texture/i.test(pattern || '')) return 14;
+    if (/maj7|seventh|Sevenths/i.test(pattern || '') && iv.length > 3) return iv[3];
+    if (/sus4/i.test(pattern || '')) return 5;
+    if (/sus2/i.test(pattern || '')) return 2;
+    if (/pentMinor|minor/i.test(pattern || '')) return [0, 3, 5, 7, 10][seed % 5];
+    if (/pent|Top|top|melody|Melod/i.test(pattern || '')) return [0, 2, 4, 7, 9][seed % 5];
+    return [0, iv[1] || 4, 7, 12][seed % 4];
+  },
+
+  _voicingTopLine(v, dur, pattern, stageKey, seed) {
+    const sparse = stageKey === 'prep' || stageKey === 'close';
+    const beats = sparse ? [0, 2] : (dur <= 2 ? [0, 1] : [0, 1, 2, 3]);
+    return beats.filter(beat => beat < dur).map((beat, i, arr) => {
+      const interval = this._voicingTopInterval(v.parsed, pattern, seed + i);
+      let midi = 60 + v.parsed.rootPc + interval;
+      while (midi < 72) midi += 12;
+      while (midi > 88) midi -= 12;
+      const last = i === arr.length - 1;
+      return { midi, beat, dur: Math.min(last && dur - beat > 1 ? dur - beat : 1, dur - beat) };
+    }).filter(ev => ev.dur > 0);
+  },
+
+  _voicingSupportDuration(texture, stageKey, dur) {
+    if (dur <= 2) return dur;
+    if (texture === 'full' && stageKey !== 'prep' && stageKey !== 'close') return 2;
+    return dur;
+  },
+
+  _voicingBass(v, dur, texture, pattern) {
+    const root = v.root;
+    const events = [];
+    const push = (midi, beat, d) => {
+      if (beat < dur && d > 0) events.push({ midi, beat, dur: Math.min(d, dur - beat) });
+    };
+    if (texture === 'wide' || texture === 'full' || /cinematic|instrumental|wide/i.test(pattern || '')) {
+      push(root, 0, dur >= 4 ? 2 : dur / 2);
+      push(root + 7, dur >= 4 ? 2 : dur / 2, dur >= 4 ? dur - 2 : dur / 2);
+      return events;
+    }
+    if (texture === 'modern' || texture === 'openBass' || texture === 'bassVoicing') {
+      push(root, 0, dur >= 4 ? 2 : dur);
+      if (dur >= 4) push(root + 12, 2, 2);
+      return events;
+    }
+    push(root, 0, dur);
+    return events;
+  },
+
+  _voicingPatternLabel(pattern) {
+    const labels = {
+      jumpCompare: 'Comparación de saltos',
+      nearestInversion: 'Inversión cercana',
+      sameZone: 'Una zona del teclado',
+      minimumRoute: 'Movimiento mínimo',
+      commonTones: 'Notas comunes',
+      topNote: 'Nota superior',
+      closedOpenCompare: 'Cerrado vs abierto',
+      discoverAdd9: 'Add9',
+      discoverSus2: 'Sus2',
+      discoverSus4: 'Sus4',
+      oneNoteMoves: 'Una nota se mueve',
+      firstModern: 'Sonido moderno',
+      voicingFinalProject: 'Proyecto final de voicings',
+    };
+    return labels[pattern] || pattern || 'Recurso de voicing';
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  //  MELODÍA Y ARREGLO
+  // ════════════════════════════════════════════════════════════════
+
+  _generateMelodyArrangement(config, mode, tech, style, diff) {
+    const prog = (config.chords && config.chords.length) ? config.chords.slice() : ['C'];
+    const total = Math.max(5, parseInt(config.bars, 10) || 8);
+    const meta = config.meta || {};
+    const useInv = !!meta.useInversions;
+    const pattern = meta.arrangementPattern || 'simplePhrase';
+    const accompaniment = meta.arrangementAccompaniment || 'bass';
+    const finalBpm = clamp(parseInt(config.bpm, 10) || Math.round(style.bpm * diff.bpmFactor), 40, 200);
+    const plan = this._chordStagePlan(total, prog, false);
+
+    let prevMean = null;
+    const chooseVoicing = (label) => {
+      const p = this._parseChord(label);
+      if (!p) return null;
+      const rh = useInv && prevMean !== null
+        ? this._closestChordVoicing(label, prevMean).v
+        : this._chordVoicing(label, 0);
+      prevMean = this._voicingMean(rh);
+      return { rh, parsed: p, root: 36 + p.rootPc, label };
+    };
+
+    const measures = [];
+    const sectionMeta = [];
+    let mi = 0;
+
+    plan.forEach(stage => {
+      const startBar = mi;
+      for (let b = 0; b < stage.bars; b++) {
+        const segments = this._arrangementSegments(prog, stage, b, total);
+        const built = this._arrangementMeasure(segments, chooseVoicing, {
+          techniqueKey: config.technique,
+          pattern,
+          accompaniment,
+          stageKey: stage.key,
+          globalMeasure: mi,
+          form: meta.arrangementForm || '',
+        });
+        measures.push({
+          index: mi,
+          sectionKey:   stage.key,
+          sectionLabel: stage.label,
+          chord: segments.map(s => s.label).join(' '),
+          chordSegs: this._collapseSegs(segments),
+          treble: built.treble,
+          bass: built.bass,
+        });
+        mi++;
+      }
+      const note = (PracticeLibrary.sections.find(s => s.key === stage.key) || {}).note || '';
+      sectionMeta.push({ key: stage.key, label: stage.label, startBar, endBar: mi - 1, note, simplified: (stage.key === 'prep' || stage.key === 'close') });
+    });
+
+    const exTitle = config.title ? `${config.n}. ${config.title}` : tech.label;
+
+    return {
+      title:    `${mode.label} · ${exTitle}`,
+      subtitle: `${diff.label} · ${total} compases · ${finalBpm} BPM`,
+      timeSig:  '4/4',
+      measureBeats: 4,
+      origBpm:  finalBpm,
+      fifths:   0,
+      measures,
+      sections: sectionMeta,
+      meta: {
+        mode: mode.label, modeKey: config.mode,
+        technique: tech.label, techniqueKey: config.technique,
+        exercise: config.title || '', exerciseN: config.n || null,
+        style: style.label, styleKey: config.style,
+        pattern: meta.arrangementResource || this._arrangementPatternLabel(pattern),
+        patternKey: pattern,
+        difficulty: diff.label, diffKey: config.difficulty,
+        tonic: diff.tonic, rel: diff.rel, sharps: 0,
+        bpm: finalBpm, pending: false,
+        explain: config.explain || '',
+        arrangementPattern: pattern,
+        arrangementAccompaniment: accompaniment,
+        arrangementResource: meta.arrangementResource || this._arrangementPatternLabel(pattern),
+        arrangementForm: meta.arrangementForm || '',
+      },
+    };
+  },
+
+  _arrangementSegments(prog, stage, barInStage) {
+    if (stage.key === 'close') return [{ label: prog[0], beat: 0, dur: 4 }];
+    if (stage.key === 'prep') {
+      const label = prog[barInStage % Math.min(2, prog.length)];
+      return [{ label, beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'build') {
+      const subset = prog.slice(0, Math.min(4, prog.length));
+      const label = subset[barInStage % subset.length];
+      return [{ label, beat: 0, dur: 4 }];
+    }
+    if (stage.key === 'challenge' && prog.length > stage.bars) {
+      return [
+        { label: prog[(barInStage * 2) % prog.length], beat: 0, dur: 2 },
+        { label: prog[(barInStage * 2 + 1) % prog.length], beat: 2, dur: 2 },
+      ];
+    }
+    if (stage.key === 'application') {
+      const phrase = this._applicationPhrase(prog, stage.bars);
+      const label = phrase[barInStage % phrase.length];
+      return [{ label, beat: 0, dur: 4 }];
+    }
+    const label = prog[barInStage % prog.length];
+    return [{ label, beat: 0, dur: 4 }];
+  },
+
+  _arrangementMeasure(segments, chooseVoicing, opts) {
+    const treble = [];
+    const bass = [];
+    segments.forEach((s, si) => {
+      const v = chooseVoicing(s.label);
+      if (!v || !v.rh) return;
+      const effective = this._effectiveArrangementAccompaniment(opts.accompaniment, opts.stageKey, opts.globalMeasure + si);
+      const melody = this._arrangementMelody(v, s.dur, opts.pattern, opts.stageKey, opts.globalMeasure + si);
+      const addVoicing = ['chordVoicing', 'openVoicing', 'bassChords', 'bassToVoicing', 'fullArrangement'].includes(effective);
+      melody.forEach((ev, idx) => {
+        if (addVoicing && idx === 0) {
+          const support = this._arrangementSupportVoicing(v, ev.midi, effective);
+          support.forEach(midi => treble.push({ midi, beat: s.beat + ev.beat, duration: Math.min(ev.dur, s.dur - ev.beat) }));
+        }
+        treble.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
+      });
+      this._arrangementBass(v, s.dur, effective).forEach(ev => {
+        bass.push({ midi: ev.midi, beat: s.beat + ev.beat, duration: ev.dur });
+      });
+    });
+    return { treble, bass };
+  },
+
+  _effectiveArrangementAccompaniment(accompaniment, stageKey, globalMeasure) {
+    if (accompaniment === 'none') return stageKey === 'application' ? 'bassLong' : 'none';
+    if (accompaniment === 'mixedBass') return ['bass', 'rootFifth', 'octaves', 'walking'][globalMeasure % 4];
+    if (accompaniment === 'mixedPattern') return stageKey === 'challenge' ? 'alberti' : (stageKey === 'application' ? 'openArpeggio' : 'arpeggio');
+    if (accompaniment === 'mixedTexture') return ['bass', 'arpeggio', 'chordVoicing', 'rootFifth'][globalMeasure % 4];
+    if (accompaniment === 'bassToArpeggio') return stageKey === 'challenge' || stageKey === 'application' ? 'arpeggio' : 'bass';
+    if (accompaniment === 'bassToVoicing') return stageKey === 'challenge' || stageKey === 'application' ? 'chordVoicing' : 'bass';
+    if (accompaniment === 'layered') {
+      if (stageKey === 'prep') return 'bass';
+      if (stageKey === 'build') return 'rootFifth';
+      if (stageKey === 'challenge') return 'arpeggio';
+      return 'openVoicing';
+    }
+    if (accompaniment === 'fullArrangement') {
+      if (stageKey === 'prep') return 'bass';
+      if (stageKey === 'build') return 'chordVoicing';
+      if (stageKey === 'challenge') return globalMeasure % 2 ? 'alberti' : 'worship';
+      if (stageKey === 'application') return globalMeasure % 2 ? 'openVoicing' : 'wideArpeggio';
+      return 'bassLong';
+    }
+    return accompaniment || 'bass';
+  },
+
+  _arrangementMelody(v, dur, pattern, stageKey, seed) {
+    const sparse = stageKey === 'prep' || stageKey === 'close';
+    const beats = sparse ? [0, 2] : (dur <= 2 ? [0, 1] : [0, 1, 2, 3]);
+    const contour = this._arrangementContour(pattern, stageKey, seed);
+    return beats.filter(b => b < dur).map((beat, i, arr) => {
+      const isLast = i === arr.length - 1;
+      const interval = this._arrangementMelodyInterval(v, pattern, contour[(seed + i) % contour.length], isLast, stageKey);
+      return {
+        midi: this._arrangementMelodyPitch(v, interval),
+        beat,
+        dur: Math.min(isLast && dur - beat > 1 ? dur - beat : 1, dur - beat),
+      };
+    }).filter(ev => ev.dur > 0);
+  },
+
+  _arrangementContour(pattern, stageKey) {
+    if (/descending|Desc|answer|close/i.test(pattern) || stageKey === 'close') return [7, 5, 4, 2, 0, 2, 0, 0];
+    if (/ascending|climax|growth|worship|instrumental/i.test(pattern)) return [0, 2, 4, 5, 7, 9, 7, 5];
+    if (/leap|Jump/i.test(pattern)) return [0, 7, 5, 4, 2, 0, 4, 2];
+    if (/question/i.test(pattern)) return [0, 2, 4, 5, 7, 5, 4, 5];
+    if (/color|maj7|minor7|add9|sus|modern|Voicing|voicing/i.test(pattern)) return [2, 4, 7, 9, 11, 9, 7, 4];
+    return [0, 2, 4, 5, 4, 2, 1, 0];
+  },
+
+  _arrangementMelodyInterval(v, pattern, contourValue, isLast, stageKey) {
+    const iv = (v.parsed && v.parsed.iv) || [0, 4, 7];
+    if (stageKey === 'close' || /answer|Final|final/i.test(pattern) && isLast) return 0;
+    if (/targetThird|tercera/i.test(pattern) && isLast) return iv[1] || 4;
+    if (/targetFifth|quinta/i.test(pattern) && isLast) return 7;
+    if (/seventh|maj7|minor7|color|extended/i.test(pattern) && iv.length >= 4) return iv[3];
+    if (/ninth|add9|modern/i.test(pattern)) return 14;
+    if (/sus/i.test(pattern)) return iv.includes(5) ? 5 : 2;
+    if (/tension|appoggiatura/i.test(pattern) && !isLast) return (iv[1] || 4) + 1;
+    if (/question/i.test(pattern) && isLast) return 7;
+    const diatonic = [0, 2, 4, 5, 7, 9, 11, 12, 14];
+    const closest = diatonic.reduce((best, x) => Math.abs(x - contourValue) < Math.abs(best - contourValue) ? x : best, 0);
+    return closest;
+  },
+
+  _arrangementMelodyPitch(v, interval) {
+    let midi = 60 + v.parsed.rootPc + interval;
+    while (midi < 72) midi += 12;
+    while (midi > 88) midi -= 12;
+    return midi;
+  },
+
+  _arrangementSupportVoicing(v, melodyMidi, kind) {
+    const raw = v.rh.slice().filter(n => n < melodyMidi - 1);
+    if (kind === 'openVoicing' || kind === 'fullArrangement') return raw.filter((_, i) => i !== 1).slice(-2);
+    return raw.slice(-3);
+  },
+
+  _arrangementBass(v, dur, kind) {
+    if (kind === 'none') return [];
+    const p = v.parsed || { iv: [0, 4, 7] };
+    const root = v.root;
+    const third = p.iv[1] || 4;
+    const fifth = 7;
+    const tenth = 12 + third;
+    const events = [];
+    const push = (midi, beat, d) => {
+      if (beat < dur && d > 0) events.push({ midi, beat, dur: Math.min(d, dur - beat) });
+    };
+    if (kind === 'bassLong' || kind === 'bass' || kind === 'chordVoicing' || kind === 'openVoicing') {
+      push(root, 0, dur);
+      return events;
+    }
+    if (kind === 'bassSparse') {
+      push(root, 0, Math.min(2, dur));
+      return events;
+    }
+    if (kind === 'rootFifth' || kind === 'alternatingBass' || kind === 'balladBass') {
+      push(root, 0, dur >= 4 ? 2 : dur / 2);
+      push(root + fifth, dur >= 4 ? 2 : dur / 2, dur >= 4 ? dur - 2 : dur / 2);
+      return events;
+    }
+    if (kind === 'octaves' || kind === 'octaveFifth' || kind === 'wideBass' || kind === 'modernBass') {
+      push(root, 0, dur >= 4 ? 2 : dur / 2);
+      push(root + 12, dur >= 4 ? 2 : dur / 2, dur >= 4 ? dur - 2 : dur / 2);
+      if (kind === 'modernBass' && dur >= 4) push(root + fifth, 1, 1);
+      return events;
+    }
+    if (kind === 'walking') {
+      const seq = [0, 2, 4, 5, 7, 5, 4, 2];
+      for (let b = 0, i = 0; b < dur; b += 0.5, i++) push(root + seq[i % seq.length], b, 0.5);
+      return events;
+    }
+    if (kind === 'arpeggio' || kind === 'arpeggioDown' || kind === 'openArpeggio' || kind === 'balladArpeggio' || kind === 'extendedArpeggio' || kind === 'wideArpeggio') {
+      const seq = kind === 'arpeggioDown'
+        ? [12, 7, third, 0]
+        : (kind === 'openArpeggio' || kind === 'wideArpeggio' || kind === 'extendedArpeggio' ? [0, 7, tenth, 7] : [0, third, 7, third]);
+      for (let b = 0, i = 0; b < dur; b += 0.5, i++) push(root + seq[i % seq.length], b, 0.5);
+      return events;
+    }
+    if (kind === 'alberti') {
+      const seq = [0, 7, third, 7];
+      for (let b = 0, i = 0; b < dur; b += 0.5, i++) push(root + seq[i % seq.length], b, 0.5);
+      return events;
+    }
+    if (kind === 'worship') {
+      const seq = [0, 7, 12, 7];
+      for (let b = 0, i = 0; b < dur; b += 0.5, i++) push(root + seq[i % seq.length], b, 0.5);
+      return events;
+    }
+    if (kind === 'bassChords') {
+      push(root, 0, dur);
+      return events;
+    }
+    push(root, 0, dur);
+    return events;
+  },
+
+  _arrangementPatternLabel(pattern) {
+    const labels = {
+      shortMotif: 'Motivo corto',
+      repetition: 'Repeticion',
+      question: 'Pregunta musical',
+      answer: 'Respuesta musical',
+      questionAnswer: 'Pregunta y respuesta',
+      breathing: 'Espacios melodicos',
+      variation: 'Variacion',
+      ascending: 'Direccion ascendente',
+      descending: 'Direccion descendente',
+      climax: 'Punto alto',
+      colorMelody: 'Color melodico',
+      albertiSong: 'Melodia + Alberti',
+      arrangementFinal: 'Proyecto final de arreglo',
+    };
+    return labels[pattern] || 'Melodia y arreglo';
   },
 
   _generateAccompaniment(config, mode, tech, style, diff) {
