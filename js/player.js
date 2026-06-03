@@ -37,6 +37,9 @@ const Player = {
   _heldPrev: null,   // notas sostenidas del step anterior (release+repress)
   _releaseTimers: null,
   _followTimer: null,
+  _followStepCacheMeasure: null,
+  _followStepCache: null,
+  _followUiMeasure: null,
   _followStreak: 0,   // aciertos consecutivos (se reinicia con un fallo)
   _followHits: 0,     // total de aciertos en la sesión de seguimiento
   _followMisses: 0,   // total de notas incorrectas en la sesión de seguimiento
@@ -463,6 +466,9 @@ const Player = {
     this._pressed.clear();
     this._correct.clear();
     this._heldPrev.clear();
+    this._followStepCacheMeasure = null;
+    this._followStepCache = null;
+    this._followUiMeasure = null;
     this._stepIdx = 0;
     this._followStreak = 0;
     this._followHits = 0;
@@ -476,10 +482,13 @@ const Player = {
 
   stopFollow() {
     this.followActive = false;
-    if (this._followTimer) { clearTimeout(this._followTimer); this._followTimer = null; }
+    this._followTimer = null;
     if (this._releaseTimers) { Object.values(this._releaseTimers).forEach(t => clearTimeout(t)); this._releaseTimers = {}; }
     if (this._correct) this._correct.clear();
     if (this._heldPrev) this._heldPrev.clear();
+    this._followStepCacheMeasure = null;
+    this._followStepCache = null;
+    this._followUiMeasure = null;
     this._showFollowHud(false);
     this._refreshFollowBtn();
   },
@@ -522,22 +531,33 @@ const Player = {
   // Conjunto de midi requeridos en el step actual (respeta el selector de manos).
   _followRequired() {
     if (!this.session) return new Set();
-    const measure = this.session.measures[this.currentMeasure];
-    if (!measure) return new Set();
-    const steps = PianoEngine.computeSteps(measure);
+    const steps = this._followStepsForCurrentMeasure();
     const step  = steps[this._stepIdx];
     if (!step) return new Set();
     return new Set(step.notes.filter(n => this._handAllows(n)).map(n => n.midi));
+  },
+
+  _followStepsForCurrentMeasure() {
+    if (!this.session) return [];
+    if (this._followStepCacheMeasure !== this.currentMeasure || !this._followStepCache) {
+      const measure = this.session.measures[this.currentMeasure];
+      this._followStepCache = measure ? PianoEngine.computeSteps(measure) : [];
+      this._followStepCacheMeasure = this.currentMeasure;
+    }
+    return this._followStepCache;
   },
 
   // Muestra el step actual: playhead + notas esperadas resaltadas.
   _followShowStep() {
     const measure = this.session.measures[this.currentMeasure];
     if (!measure) return;
-    const steps = PianoEngine.computeSteps(measure);
+    const steps = this._followStepsForCurrentMeasure();
     const step  = steps[this._stepIdx];
     if (!step) return;
-    this._syncMeasureUI(this.currentMeasure);
+    if (this._followUiMeasure !== this.currentMeasure) {
+      this._syncMeasureUI(this.currentMeasure);
+      this._followUiMeasure = this.currentMeasure;
+    }
     const geom = this._measureGeom(this.currentMeasure);
     this._movePlayhead(geom, this._stepIdx, steps.length, step.beat);
     const notes = step.notes.filter(n => this._handAllows(n));
@@ -604,10 +624,12 @@ const Player = {
 
   _scheduleFollowAdvance() {
     if (this._followTimer) return;
-    this._followTimer = setTimeout(() => {
-      this._followTimer = null;
+    this._followTimer = true;
+    try {
       if (this.followActive) this._followAdvance();
-    }, 90);
+    } finally {
+      this._followTimer = null;
+    }
   },
 
   _followAdvance() {
@@ -616,7 +638,7 @@ const Player = {
     this._heldPrev = new Set(this._pressed);
     this._correct.clear();
 
-    const steps = PianoEngine.computeSteps(this.session.measures[this.currentMeasure]);
+    const steps = this._followStepsForCurrentMeasure();
     const atLastStep    = this._stepIdx >= steps.length - 1;
     const atLastMeasure = this.currentMeasure >= this.session.measures.length - 1;
 
