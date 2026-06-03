@@ -561,6 +561,19 @@ const Player = {
     const geom = this._measureGeom(this.currentMeasure);
     this._movePlayhead(geom, this._stepIdx, steps.length, step.beat);
     const notes = step.notes.filter(n => this._handAllows(n));
+    // Acreditar notas que ya vienes sosteniendo y que este step requiere
+    // (notas comunes de un acorde, bajos sostenidos): cuentan como correctas
+    // sin obligar a soltarlas y re-pulsarlas. Sin esto, una nota común quedaba
+    // bloqueada en _heldPrev y el acorde nunca se completaba ⇒ la barra se
+    // "pegaba" en progresiones de acordes que comparten notas.
+    if (this._pressed && this._heldPrev) {
+      notes.forEach(n => {
+        if (this._pressed.has(n.midi)) {
+          this._correct.add(n.midi);
+          this._heldPrev.delete(n.midi);
+        }
+      });
+    }
     PianoEngine.highlightNotes(notes);
     // Marcar en verde las que ya estén correctamente sostenidas.
     this._correct.forEach(m => PianoEngine.markCorrect(m));
@@ -619,7 +632,11 @@ const Player = {
 
   _followStepComplete(required = this._followRequired()) {
     if (!required.size) return true;
-    return [...required].every(m => this._correct.has(m) && this._pressed.has(m));
+    // Basta con que cada nota requerida se haya tocado correctamente en este
+    // step (esté en _correct). NO exigimos que siga físicamente pulsada: así un
+    // acorde "rodado" (sueltas una nota un instante antes de pulsar la última)
+    // avanza igual, en vez de quedarse pegado esperando una pulsación perfecta.
+    return [...required].every(m => this._correct.has(m));
   },
 
   _scheduleFollowAdvance() {
