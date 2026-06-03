@@ -1,4 +1,4 @@
-const CACHE_NAME = 'pianoflow-pwa-v6';
+const CACHE_NAME = 'pianoflow-pwa-v7';
 
 const APP_ASSETS = [
   './',
@@ -18,7 +18,7 @@ const APP_ASSETS = [
   './js/midi-engine.js',
   './js/notation-engine.js',
   './js/session-generator.js?v=fingering-melodies-1',
-  './js/player.js?v=follow-chords-1',
+  './js/player.js?v=follow-chords-2',
   './js/app.js?v=app-safe-area-2'
 ];
 

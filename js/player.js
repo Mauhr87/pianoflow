@@ -40,6 +40,7 @@ const Player = {
   _followStepCacheMeasure: null,
   _followStepCache: null,
   _followUiMeasure: null,
+  _followGeomCache: null,   // geometría del compás cacheada (evita reflow por step)
   _followStreak: 0,   // aciertos consecutivos (se reinicia con un fallo)
   _followHits: 0,     // total de aciertos en la sesión de seguimiento
   _followMisses: 0,   // total de notas incorrectas en la sesión de seguimiento
@@ -469,6 +470,7 @@ const Player = {
     this._followStepCacheMeasure = null;
     this._followStepCache = null;
     this._followUiMeasure = null;
+    this._followGeomCache = null;
     this._stepIdx = 0;
     this._followStreak = 0;
     this._followHits = 0;
@@ -489,6 +491,7 @@ const Player = {
     this._followStepCacheMeasure = null;
     this._followStepCache = null;
     this._followUiMeasure = null;
+    this._followGeomCache = null;
     this._showFollowHud(false);
     this._refreshFollowBtn();
   },
@@ -557,8 +560,13 @@ const Player = {
     if (this._followUiMeasure !== this.currentMeasure) {
       this._syncMeasureUI(this.currentMeasure);
       this._followUiMeasure = this.currentMeasure;
+      this._followGeomCache = null;   // nuevo compás ⇒ recalcular geometría una vez
     }
-    const geom = this._measureGeom(this.currentMeasure);
+    // La geometría de las notas no cambia dentro de un compás: la calculamos una
+    // sola vez (un reflow por compás, no por step) y la reusamos. Clave para que
+    // la barra no se "pegue" en tablets de gama baja.
+    if (!this._followGeomCache) this._followGeomCache = this._measureGeom(this.currentMeasure);
+    const geom = this._followGeomCache;
     this._movePlayhead(geom, this._stepIdx, steps.length, step.beat);
     const notes = step.notes.filter(n => this._handAllows(n));
     // Acreditar notas que ya vienes sosteniendo y que este step requiere
