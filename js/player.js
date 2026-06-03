@@ -934,10 +934,11 @@ const Player = {
       host.style.position = 'relative';
       host.insertBefore(bar, host.firstChild);
     }
-    bar.style.left    = `${x}px`;
-    bar.style.top     = `${top}px`;
-    bar.style.height  = `${height}px`;
-    bar.style.display = 'block';
+    // translate3d en lugar de left/top: movimiento compositado en GPU, sin
+    // forzar reflow ni repintar el SVG de la partitura debajo.
+    bar.style.transform = `translate3d(${x}px, ${top}px, 0)`;
+    bar.style.height    = `${height}px`;
+    bar.style.display   = 'block';
   },
 
   // Mueve el playhead al step `si` del compás. Usa la posición real de la

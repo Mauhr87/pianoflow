@@ -661,6 +661,7 @@ h2 { font-size: 19px; font-weight: 800; line-height: 1.3; margin-bottom: 4px; }
 /* Visor: banda translúcida sobre el compás que se está tocando */
 .pf-measure-cursor {
   position: absolute;
+  left: 0; top: 0;
   display: none;
   z-index: 3;
   pointer-events: none;
@@ -668,7 +669,12 @@ h2 { font-size: 19px; font-weight: 800; line-height: 1.3; margin-bottom: 4px; }
   margin-left: -1.5px;          /* centrar la barra en la x de la nota */
   background: var(--teal);
   border-radius: 2px;
-  transition: left .12s linear, height .12s ease, top .12s ease;
+  /* Posicionamos con transform (compositado en GPU) en vez de left/top: así
+     mover la barra NO repinta el SVG de la partitura que tiene debajo. Clave
+     para que no se "pegue" en tablets de gama baja. */
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  transition: transform .1s linear, height .1s ease;
 }
 
 /* ── Teclado ────────────────────────────────────────── */
