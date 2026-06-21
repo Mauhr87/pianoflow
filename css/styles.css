@@ -15,14 +15,14 @@
   --teal-tint: #ecf6f4;
 
   /* Acentos secundarios para mano derecha / izquierda */
-  --treble:      #b45309;
-  --treble-soft: #fef3c7;
-  --bass:        #1d4ed8;
-  --bass-soft:   #dbeafe;
-  --both:        #7c3aed;
-  --both-soft:   #ede9fe;
-  --correct:     #16a34a;
-  --correct-soft:#dcfce7;
+  --treble:      #f97316;
+  --treble-soft: #fdba74;
+  --bass:        #2563eb;
+  --bass-soft:   #93c5fd;
+  --both:        #a855f7;
+  --both-soft:   #c084fc;
+  --correct:     #22c55e;
+  --correct-soft:#86efac;
 
   /* Neutrales */
   --ink:    #141b19;
@@ -723,6 +723,23 @@ h2 { font-size: 19px; font-weight: 800; line-height: 1.3; margin-bottom: 4px; }
 }
 
 /* Highlights del teclado */
+.key-w.hl-treble,
+.key-w.hl-bass,
+.key-w.hl-both,
+.key-w.hl-correct {
+  color: #0f172a;
+  box-shadow:
+    inset 0 0 0 2px rgba(15, 23, 42, .26),
+    inset 0 -10px 18px rgba(255, 255, 255, .22);
+}
+.key-b.hl-treble,
+.key-b.hl-bass,
+.key-b.hl-both,
+.key-b.hl-correct {
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, .72),
+    0 0 14px rgba(255, 255, 255, .28);
+}
 .key-w.hl-treble { background: var(--treble-soft); }
 .key-b.hl-treble { background: var(--treble); }
 .key-w.hl-bass   { background: var(--bass-soft); }
@@ -1046,14 +1063,14 @@ h2 { font-size: 19px; font-weight: 800; line-height: 1.3; margin-bottom: 4px; }
   --lav-soft:  #f1ecff;
   --cream:     #fffaf1;
 
-  --treble:      #c96a19;
-  --treble-soft: #fff1d6;
-  --bass:        #235ad8;
-  --bass-soft:   #e3e9ff;
-  --both:        #8b55df;
-  --both-soft:   #f0e8ff;
-  --correct:     #39b86d;
-  --correct-soft:#e5f8e6;
+  --treble:      #f97316;
+  --treble-soft: #fdba74;
+  --bass:        #2563eb;
+  --bass-soft:   #93c5fd;
+  --both:        #a855f7;
+  --both-soft:   #c084fc;
+  --correct:     #22c55e;
+  --correct-soft:#86efac;
 
   --ink:    #101f22;
   --muted:  #627073;
