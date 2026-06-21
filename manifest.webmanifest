@@ -2,12 +2,18 @@
   "name": "PianoFlow",
   "short_name": "PianoFlow",
   "description": "Practica piano con ejercicios progresivos de acordes, acompañamiento, arpegios, escalas, coordinación, melodía y voicings.",
-  "start_url": "./index.html",
+  "id": "./",
+  "start_url": "./",
   "scope": "./",
   "display": "standalone",
+  "display_override": ["standalone", "minimal-ui"],
   "orientation": "any",
+  "lang": "es",
+  "dir": "ltr",
+  "categories": ["education", "music", "productivity"],
   "background_color": "#cbdadc",
   "theme_color": "#16454f",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "icons/icon-192.png",
@@ -20,6 +26,21 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Abrir práctica",
+      "short_name": "Práctica",
+      "description": "Volver a tus módulos de práctica.",
+      "url": "./",
+      "icons": [
+        {
+          "src": "icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }
